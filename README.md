@@ -28,6 +28,11 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 - **Autoregressive diffusion design.** Combines an MLLM condition encoder, causal video VAE, and MMDiT backbone for streaming video editing.
 - **High-throughput 720p deployment.** Reaches 30.19 FPS end-to-end throughput at 720x1280 with bounded KV-state inference and stable per-chunk compute.
 
+## 🚧 TODO
+
+- [ ] **Consumer GPU support.** Optimize deployment for consumer-grade GPUs such as GeForce RTX 5090.
+- [ ] **RV2V support.** Add reference-image-guided video editing, where an input video can be edited using both a text instruction and a reference image.
+
 ## 🎬 Showcase
 
 JoyAI-Video-Edit is designed for broad video editing tasks, including global appearance changes, local object edits, subject add/remove/replace, background replacement, style transfer, and reference-guided edits.
