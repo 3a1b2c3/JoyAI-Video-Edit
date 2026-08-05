@@ -5,7 +5,7 @@
   <a href="https://arxiv.org/pdf/2608.03974"><img src="https://img.shields.io/badge/Paper-arXiv-red" alt="Paper"></a>
   <a href="#"><img src="https://img.shields.io/badge/Project-JoyAI--Video--Edit-333399" alt="Project"></a>
   <a href="https://huggingface.co/jdopensource/JoyAI-Video-Edit"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Checkpoint-JoyAI--Video--Edit-yellow" alt="Hugging Face"></a>
-  <a href="#quick-start"><img src="https://joyai-labs.jd.com/v2v/" alt="Demo"></a>
+  <a href="https://joyai-labs.jd.com/v2v/"><img src="https://img.shields.io/badge/Demo-JoyAI--Video--Edit-ff69b4" alt="Demo"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
 </p>
 
