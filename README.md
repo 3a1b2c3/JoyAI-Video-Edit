@@ -31,7 +31,8 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 ## 🚧 TODO
 
 - [ ] **Consumer GPU support.** Optimize deployment for consumer-grade GPUs such as GeForce RTX 5090.
-- [ ] **RV2V support.** Add reference-image-guided video editing, where an input video can be edited using both a text instruction and a reference image.
+- [ ] **Stronger model version in progress.** A more powerful version is under active development, with a particular focus on advancing reference-image-guided video editing (RV2V) capabilities.
+- [ ] **Release full training and data pipelines.** Open-source the complete training framework and data generation pipeline.
 
 ## 🎬 Showcase
 
