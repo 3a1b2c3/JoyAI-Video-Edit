@@ -127,11 +127,11 @@ For custom deployment, edit `deploy/run_server.sh` to set checkpoint paths, CUDA
 If JoyAI-Video-Edit is useful for your research or product prototype, please cite:
 
 ```bibtex
-@misc{joyai_video_edit_2026,
-  title  = {JoyAI-Video-Edit: Real-Time Open-Ended Video Editing with Autoregressive Diffusion},
-  author = {Xiao, Yicheng and Dai, Wenxun and Qin, Xinran and Song, Lin and others},
-  year   = {2026},
-  note   = {Technical report}
+@article{xiao2026joyai,
+  title={JoyAI-Video-Edit: Real-Time Open-Ended Video Editing with Autoregressive Diffusion},
+  author={Xiao, Yicheng and Dai, Wenxun and Qin, Xinran and Song, Lin and Zhang, Maoquan and Xu, Hang and Chen, Yukang and Li, Yitong and Zhang, Guohui and Zhang, Yuan and Zhang, Xuying and Zhang, Tommy and Yuan, Jianlong and Li, Peihao and Lu, Shuai and Fu, Siming and Zhao, Chuyang and Han, Xin and Huang, Jie and Li, Wenbo and Ma, Guoqing and Huang, Wei and Qi, Xiaojuan and Huang, Haoyang and Duan, Nan},
+  journal={arXiv preprint arXiv:2608.03974},
+  year={2026}
 }
 ```
 
