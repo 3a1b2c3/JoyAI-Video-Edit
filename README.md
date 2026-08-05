@@ -2,7 +2,7 @@
 <h3 align="center">Real-Time Open-Ended Video Editing with Autoregressive Diffusion</h3>
 
 <p align="center">
-  <a href="#"><img src="https://img.shields.io/badge/Paper-coming%20soon-red" alt="Paper"></a>
+  <a href="https://arxiv.org/pdf/2608.03974"><img src="https://img.shields.io/badge/Paper-arXiv-red" alt="Paper"></a>
   <a href="#"><img src="https://img.shields.io/badge/Project-JoyAI--Video--Edit-333399" alt="Project"></a>
   <a href="https://huggingface.co/jdopensource/JoyAI-Video-Edit"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Checkpoint-JoyAI--Video--Edit-yellow" alt="Hugging Face"></a>
   <a href="#quick-start"><img src="https://img.shields.io/badge/%F0%9F%9A%80%20Demo-Streaming--V2V-orange" alt="Demo"></a>
@@ -19,7 +19,7 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 
 ## 🔥🔥🔥 News!!
 
-- 2026.08.05: 🎉 We release the deployment code, technical report, online demo, and JoyAI-Video-Edit checkpoints. Please check the links above for details.
+- 2026.08.05: 🎉 We release the deployment code, [technical report](https://arxiv.org/pdf/2608.03974), online demo, and JoyAI-Video-Edit checkpoints. Please check the links above for details.
 
 ## 💎 Highlights
 
