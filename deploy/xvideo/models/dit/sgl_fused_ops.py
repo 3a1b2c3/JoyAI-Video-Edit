@@ -19,7 +19,11 @@ def _try_import() -> bool:
     global _AVAILABLE, _FUSED_NORM_SCALE_SHIFT, _FUSED_QK_NORM_ROPE_3D, _RMSNORM
     if _AVAILABLE is not None:
         return _AVAILABLE
-    from sgl_kernel import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
+    try:
+        from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
+    except Exception:
+        _AVAILABLE = False
+        return _AVAILABLE
     _RMSNORM = rmsnorm
     _FUSED_NORM_SCALE_SHIFT = fused_norm_scale_shift
     _FUSED_QK_NORM_ROPE_3D = fused_qk_norm_rope_3d_paired
@@ -37,7 +41,9 @@ def fused_layernorm_modulate(
     eps: float = 1e-6,
 ) -> torch.Tensor:
     if not _try_import():
-        raise RuntimeError("sgl_kernel not available")
+        raise RuntimeError(
+            "joyomni_ops not available; build it with `pip install ./joyomni_ops`"
+        )
     B, L, D = x.shape
     x_2d = x.reshape(-1, D)
 
@@ -64,7 +70,9 @@ def fused_qk_norm_rope_3d(
     eps: float = 1e-6,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     if not _try_import():
-        raise RuntimeError("sgl_kernel not available")
+        raise RuntimeError(
+            "joyomni_ops not available; build it with `pip install ./joyomni_ops`"
+        )
     if q.dtype != torch.bfloat16:
         raise RuntimeError(
             f"fused_qk_norm_rope_3d requires bf16 q/k, got {q.dtype}"
@@ -101,7 +109,9 @@ def fused_qk_norm_rope_3d(
 
 def rmsnorm_qk_bf16(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     if not _try_import() or _RMSNORM is None:
-        raise RuntimeError("sgl_kernel rmsnorm not available")
+        raise RuntimeError(
+            "joyomni_ops rmsnorm not available; build it with `pip install ./joyomni_ops`"
+        )
     assert x.dtype == torch.bfloat16, f"rmsnorm_qk_bf16 needs bf16, got {x.dtype}"
     orig_shape = x.shape
     D = orig_shape[-1]
