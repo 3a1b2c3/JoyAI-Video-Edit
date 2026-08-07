@@ -7,6 +7,8 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 
 from diffusers.models import ModelMixin
@@ -118,16 +120,43 @@ def _clone_kv_tensor(tensor: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     return tensor.detach().clone()
 
 
+_FA4_DISABLED = False
+
+# SM120 (Blackwell): cuDNN attention is ~10-20% faster than PyTorch's flash backend
+# here, so order it first. flash/efficient are fallbacks. (Benchmarked H=32 D=128 bf16.)
+_SDPA_BACKENDS = [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
+
+
+def _sdpa_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+    # q/k/v come in as [B, S, H, D]; SDPA expects [B, H, S, D].
+    q = query.transpose(1, 2)
+    k = key.transpose(1, 2)
+    v = value.transpose(1, 2)
+    with sdpa_kernel(_SDPA_BACKENDS):
+        out = F.scaled_dot_product_attention(q, k, v, is_causal=False)
+    return out.transpose(1, 2)
+
+
 def _flash_attention4(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+    global _FA4_DISABLED
     original_dtype = query.dtype
     if query.dtype not in (torch.float16, torch.bfloat16):
         query = query.to(torch.bfloat16)
         key = key.to(torch.bfloat16)
         value = value.to(torch.bfloat16)
-    out = _fa4_func(query, key, value, causal=False)
-    if isinstance(out, tuple):
-        out = out[0]
-    return out.to(original_dtype)
+    if not _FA4_DISABLED:
+        try:
+            out = _fa4_func(query, key, value, causal=False)
+            if isinstance(out, tuple):
+                out = out[0]
+            return out.to(original_dtype)
+        except Exception as exc:  # noqa: BLE001
+            # FA4 4.0.0b13 fails to bind its CuTe kernel against some
+            # nvidia-cutlass-dsl versions (see issue #4). Probe once, then fall
+            # back to SDPA (still a fused flash/cuDNN kernel on sm100/sm120).
+            _FA4_DISABLED = True
+            logger.warning(f"[{__name__}] FA4 unavailable, falling back to SDPA (flash/cuDNN): {exc!r}")
+    return _sdpa_attention(query, key, value).to(original_dtype)
 
 
 def warmup_attention_backend(
