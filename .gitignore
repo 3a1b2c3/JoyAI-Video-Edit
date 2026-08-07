@@ -7,6 +7,10 @@ __pycache__/
 *.egg-info/
 .ipynb_checkpoints/
 
+# joyomni_ops native build artifacts (built from source; never commit binaries)
+joyomni_ops/build/
+*.so
+
 # OS / editor
 .DS_Store
 

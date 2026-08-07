@@ -40,6 +40,21 @@ python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 ```
 
+The fused DiT CUDA kernels (RMSNorm, adaLN modulate, 3D-RoPE QK-norm, and the
+FP8 quant/GEMM) are provided by the vendored `joyomni_ops` package, not by
+sgl-kernel. Build and install it from the repo root:
+
+```bash
+# Full build (FP8 GEMM included): point at a cutlass checkout, tag
+# 57e3cfb47a2d9e0d46eb6335c3dc411498efa198, CUDA >= 12.8 for Blackwell SASS.
+JOYOMNI_OPS_CUTLASS_DIR=/path/to/cutlass python -m pip install ./joyomni_ops
+
+# Light build (no FP8 GEMM, no cutlass needed) — set JOYOMNI_FP8_IMG=0 at runtime:
+# JOYOMNI_OPS_NO_FP8=1 python -m pip install ./joyomni_ops
+```
+
+See `joyomni_ops/README.md` for op list, GPU-arch selection, and benchmarks.
+
 Verify the key runtime imports:
 
 ```bash
@@ -48,10 +63,11 @@ import torch
 import cv2
 import av
 import flash_attn.cute
-import sgl_kernel
+import joyomni_ops
 
 print("torch", torch.__version__, "cuda", torch.version.cuda)
 print("cuda available:", torch.cuda.is_available())
+print("joyomni_ops fp8:", joyomni_ops.has_fp8())
 print("cv2", cv2.__version__)
 PY
 ```
@@ -98,7 +114,7 @@ The public deployment package was tested with a single NVIDIA B200 GPU:
 | Transformers / Diffusers | `4.57.0` / `0.36.0` |
 | FastAPI / Uvicorn | `0.117.1` / `0.37.0` |
 | OpenCV / PyAV | `opencv-python-headless 4.13.0.92` / `av 13.1.0` |
-| Attention / kernel packages | `flash-attn-4 4.0.0b13`, `sgl-kernel 0.3.18.post2`, `triton 3.5.1`, `nvidia-cutlass-dsl 4.5.1` |
+| Attention / kernel packages | `flash-attn-4 4.0.0b13`, `joyomni_ops 0.1.0` (vendored, built from source), `triton 3.5.1`, `nvidia-cutlass-dsl 4.5.1` |
 
 ## 2. Clone JoyAI-Video-Edit Weights
 
