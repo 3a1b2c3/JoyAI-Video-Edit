@@ -176,7 +176,10 @@ class _H264Ingest:
     def decode_one(self, au: bytes) -> Image.Image | None:
         import av
 
-        frames = self._dec.decode(av.Packet(au))
+        try:
+            frames = self._dec.decode(av.Packet(au))
+        except av.error.InvalidDataError:
+            return None
         if not frames:
             return None
         return Image.fromarray(frames[-1].to_ndarray(format="rgb24"), mode="RGB")
