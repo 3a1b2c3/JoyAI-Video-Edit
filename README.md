@@ -81,7 +81,7 @@ Download the released JoyAI-Video-Edit weights from [Hugging Face](https://huggi
 ```text
 deploy/deps/checkpoints/JoyAI-Video-Edit/
 |-- dit/
-|   `-- joyai_video_edit_dit_0804.pth
+|   `-- joyai_video_edit_dit_0811.pth
 `-- vae/
     |-- config.json
     `-- diffusion_pytorch_model.safetensors
@@ -96,7 +96,7 @@ deploy/deps/checkpoints/JoyAI-Video-Edit/
 ```bash
 conda create -n joyai-video-edit python=3.10 -y
 conda activate joyai-video-edit
-python -m pip install -r requirements.txt
+python -m pip install -r deploy/requirements.txt
 ```
 
 ### 2. Prepare Checkpoints
