@@ -5,8 +5,7 @@ fully working server: environment, weights, configuration, and launch.
 
 JoyAI-Video-Edit is a real-time, streaming **video-to-video editing** service. A
 client streams source frames over a WebSocket; the server runs a streaming DiT +
-xVAE pipeline (with a VAE super-resolution head and face/person presence gating)
-and streams edited frames back.
+xVAE pipeline (with face/person presence gating) and streams edited frames back.
 
 - **Serving stack:** FastAPI + WebSocket, served by `uvicorn`.
 - **Entry point:** [`xvideo/serving/serve_joyomni_streaming.py`](deploy/xvideo/serving/serve_joyomni_streaming.py)
@@ -34,7 +33,7 @@ deploy/
 ├── static/index.html      # browser client
 ├── rv2v_reference/        # reference images for the UI
 └── deps/                  # weights + compile cache — NOT in git
-    ├── checkpoints/       # DiT / xVAE / MiMo-VL / onnx detectors (~63G)
+    ├── checkpoints/       # DiT / xVAE / MiMo-VL / onnx detectors (~51G)
     └── cache/             # torchinductor / triton / nv_compute caches
 ```
 
@@ -171,7 +170,7 @@ PY
 
 ## 3. Fetch the weights
 
-All weights live under `deploy/deps/checkpoints/` (~63 GB total). Create it and
+All weights live under `deploy/deps/checkpoints/` (~51 GB total). Create it and
 download each dependency.
 
 ```bash
@@ -184,8 +183,12 @@ cd deploy/deps/checkpoints
 ```bash
 hf download jdopensource/JoyAI-Video-Edit \
   --repo-type model \
-  --local-dir JoyAI-Video-Edit
+  --local-dir JoyAI-Video-Edit \
+  --include "dit/joyai_video_edit_dit_0811.pth" "vae/*"
 ```
+
+> The repo also ships the older `dit/joyai_video_edit_dit_0804.pth` (~32.5 GB);
+> `--include` skips it — the server uses **0811**.
 
 This should produce:
 
@@ -283,6 +286,7 @@ Key variables:
 | `JOYOMNI_CONDA_SH` / `JOYOMNI_CONDA_ENV` | conda `profile.d/conda.sh` + env name/prefix to activate. Leave `JOYOMNI_CONDA_ENV` empty to use the already-active shell env. |
 | `JOYOMNI_DEVICE` | CUDA device for all stages (default `cuda:0`). |
 | `JOYOMNI_HOST` / `JOYOMNI_PORT` | bind address (default `0.0.0.0:8080`). |
+| `JOYOMNI_WIDTH` / `JOYOMNI_HEIGHT` / `JOYOMNI_FPS` | Output resolution and frame rate (default `840` / `480` / `24` = 480p @ 24 FPS). Per-GPU presets in §5. |
 | `JOYOMNI_FP8_IMG` / `JOYOMNI_FP8_TXT` | FP8 image / text paths via `joyomni_ops` (default `1` / `1`). Set both `0` to run bf16 (e.g. a `JOYOMNI_OPS_NO_FP8=1` build). |
 | `JOYOMNI_CUDA_GRAPH` | capture the steady-state chunk loop into a CUDA graph (default `1`; the biggest single speedup). `0` runs eager. |
 | `JOYOMNI_SAGE_ATTN` | SageAttention for long-kv attention (default `1`). `0` falls back to SDPA/cuDNN. |
@@ -310,6 +314,27 @@ Open the UI:
 http://<server-ip>:8080/
 ```
 
+### Resolution / FPS by GPU
+
+The server defaults to **840×480 @ 24 FPS** (480p). Override per GPU with `JOYOMNI_WIDTH` / `JOYOMNI_HEIGHT` / `JOYOMNI_FPS`:
+
+- **NVIDIA B200** — native 720p @ 24 FPS:
+
+  ```bash
+  JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=24 bash deploy/run_server.sh
+  ```
+
+- **RTX PRO 6000** — 480p @ 24 FPS, or native 720p @ 16 FPS:
+
+  ```bash
+  # 480p @ 24 FPS
+  JOYOMNI_WIDTH=840 JOYOMNI_HEIGHT=480 JOYOMNI_FPS=24 bash deploy/run_server.sh
+  # native 720p @ 16 FPS
+  JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=16 bash deploy/run_server.sh
+  ```
+
+- **RTX 5090** — coming soon.
+
 > The first launch is slow: PyTorch/Triton/CUDA kernels and the DiT attention path
 > compile and warm up. Keep `deploy/deps/cache/` stable across restarts to reuse
 > the compile artifacts. After moving or re-cloning the repo, the cache stores
@@ -332,7 +357,7 @@ http://<server-ip>:8080/
 Append server flags after the script (forwarded to the Python entry point):
 
 ```bash
-bash deploy/run_server.sh --port 7860 --profile-timings
+bash deploy/run_server.sh --port 7860
 ```
 
 Run without FP8 (e.g. `joyomni_ops` built with `JOYOMNI_OPS_NO_FP8=1`):
