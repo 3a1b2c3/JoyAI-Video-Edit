@@ -1538,7 +1538,7 @@ async function beginSession() {
     num_inference_steps: Number(document.getElementById("steps").value),
     use_pe: usePe,
     gate_enabled: faceGateDebugEnabled(),
-    seed: 42,
+    seed: SERVER_DEFAULTS.seed,
     kv_reset_frames: Math.max(0, Math.floor(Number(document.getElementById("kvResetFrames").value) || 0)),
     output_quality: Number(downQualityUi.value),
     output_codec: h264DecodeOk ? "h264" : "mjpeg",
@@ -2537,6 +2537,7 @@ function applyServerDefaults() {
     freezeKvOnStatic: "freeze_kv_on_static",
     usePe: "use_pe",
     dbgGateEnabled: "online_gate",
+    profileTimings: "profile_timings",
   };
   for (const [id, key] of Object.entries(boolMap)) {
     const v = d[key];

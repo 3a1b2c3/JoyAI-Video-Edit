@@ -555,6 +555,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             "height": args.height,
             "fps": args.fps,
             "num_inference_steps": args.num_inference_steps,
+            "seed": args.seed,
             "kv_reset_frames": args.kv_reset_frames,
             "output_quality": args.output_quality,
             "online_gate": args.online_gate,
