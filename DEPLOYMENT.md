@@ -360,10 +360,10 @@ Append server flags after the script (forwarded to the Python entry point):
 bash deploy/run_server.sh --port 7860
 ```
 
-Run without FP8 (e.g. `joyomni_ops` built with `JOYOMNI_OPS_NO_FP8=1`):
+Run without FP8 (e.g. `joyomni_ops` built with `JOYOMNI_OPS_NO_FP8=1`) — disable **both** FP8 paths:
 
 ```bash
-JOYOMNI_FP8_IMG=0 bash deploy/run_server.sh
+JOYOMNI_FP8_IMG=0 JOYOMNI_FP8_TXT=0 bash deploy/run_server.sh
 ```
 
 Custom checkpoint locations:
