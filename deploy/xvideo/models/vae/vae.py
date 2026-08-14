@@ -1,7 +1,6 @@
 import math
 from dataclasses import dataclass
 
-
 from einops import rearrange
 import numpy as np
 import torch
