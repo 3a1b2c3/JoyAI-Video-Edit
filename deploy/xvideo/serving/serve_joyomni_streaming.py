@@ -717,7 +717,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                       "subject_count": None, "cand": None, "cand_n": 0, "recount": False}
         kv_reset_frames = max(0, int(args.kv_reset_frames or 0))
 
-        output_quality = max(1, min(100, int(args.output_quality)))
+        output_quality = 60 if args.output_quality == "auto" else int(args.output_quality)
         output_codec = "mjpeg"
         h264_stream: _H264Stream | None = None
         input_codec = "mjpeg"
@@ -1177,7 +1177,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                             await _send_json({"type": "error", "message": f"failed to decode ref image: {exc!r}"})
                             continue
                         kv_reset_frames = max(0, int(payload.get("kv_reset_frames", args.kv_reset_frames)))
-                        output_quality = max(1, min(100, int(payload.get("output_quality", args.output_quality))))
+                        output_quality = max(1, min(100, int(payload.get("output_quality", output_quality))))
                         lossless_mode = str(payload.get("source", "")) == "file"
                         _up_allow = args.uplink_codec == "auto" and not lossless_mode
                         _dn_allow = args.downlink_codec == "auto" and not lossless_mode
@@ -1797,7 +1797,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--person-gate-conf", type=float, default=0.4, help="Min YOLO person-class score to count the person as present.")
     parser.add_argument("--person-check-stride", type=int, default=2, help="Run the person detector every Nth frame during editing (YOLO ~27ms; stride amortizes the cost). Smaller = faster stop/resume detection, more CPU.")
     parser.add_argument("--person-body-flip-frames", type=int, default=6, help="Consecutive body-misses before the client reason flips to no_person. Below this, a lone YOLO dip (a hand/object over the face also clips the torso) keeps the current reason -- normally show_full_face -- so the hint doesn't strobe no_face<->no_person. Reason-only de-bounce; the black-hold timing (--presence-absent-frames) is unaffected. ~24fps, 6 ≈ 0.25s. Higher = more reluctant to ever show no_person; 1 = report no_person on the first miss (old behavior).")
-    parser.add_argument("--output-quality", type=int, default=40)
+    parser.add_argument("--output-quality", default="auto",
+                        help="Downlink preview quality: 'auto' (RTT-adaptive) or a fixed 1-100.")
     parser.add_argument("--uplink-codec", choices=["auto", "mjpeg"],
                         default=os.environ.get("JOYOMNI_UPLINK_CODEC", "auto"),
                         help="Uplink transport. 'mjpeg' forces per-frame JPEG (preserves face consistency; h264 P-frames smear the model input). 'auto' honors browser h264. Default auto.")

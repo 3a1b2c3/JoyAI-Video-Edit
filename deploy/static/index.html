@@ -254,7 +254,7 @@
         <button type="button" data-q="60" data-i18n="q_high">高</button>
         <button type="button" data-q="auto" class="on" data-i18n="q_auto">自动</button>
       </span>
-      <input id="downQualityUi" type="hidden" value="40" />
+      <input id="downQualityUi" type="hidden" />
     </span>
     <span class="kvreset-field keep-min">
       <span data-i18n="frame_speed">送帧速度</span>
@@ -1540,7 +1540,7 @@ async function beginSession() {
     gate_enabled: faceGateDebugEnabled(),
     seed: 42,
     kv_reset_frames: Math.max(0, Math.floor(Number(document.getElementById("kvResetFrames").value) || 0)),
-    output_quality: Math.max(1, Math.min(100, Math.floor(Number((document.getElementById("downQualityUi") || {}).value) || 40))),
+    output_quality: Number(downQualityUi.value),
     output_codec: h264DecodeOk ? "h264" : "mjpeg",
     input_codec: upCodecH264 ? "h264" : "mjpeg",
     no_person_blank: faceGateDebugEnabled(),
@@ -2521,7 +2521,6 @@ function applyServerDefaults() {
     width: "width", height: "height", steps: "num_inference_steps",
     fps: "fps",
     kvResetFrames: "kv_reset_frames", staticDiffThresh: "static_diff_thresh",
-    downQualityUi: "output_quality",
   };
   for (const [id, key] of Object.entries(numMap)) {
     const v = d[key];
@@ -2548,9 +2547,13 @@ function applyServerDefaults() {
     document.getElementById("useMaxTemporalIds").checked = true;
     document.getElementById("maxTemporalIds").value = maxIds;
   }
-  if (autoQuality && Array.isArray(Q_TIERS)) {
-    setDownQuality(Q_TIERS[autoQTier], { live: false });
+  if (d.output_quality !== undefined && d.output_quality !== "auto") {
+    autoQuality = false;
+    highlightQTier(Number(d.output_quality));
+    setDownQuality(Number(d.output_quality), { live: false });
+  } else {
     highlightQTier("auto");
+    setDownQuality(Q_TIERS[autoQTier], { live: false });
   }
   if (typeof syncUpQualityUi === "function") syncUpQualityUi();
 }
