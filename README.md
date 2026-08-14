@@ -119,12 +119,6 @@ http://localhost:8080
 
 For remote machines, bind the server to `0.0.0.0` and open the selected port, or use SSH port forwarding.
 
-## 🛠️ Custom Deployment
-
-For custom deployment, edit `deploy/run_server.sh` to set checkpoint paths, CUDA device placement, host, and port. The default script also sets persistent TorchInductor, Triton, and CUDA cache directories so compile artifacts are reused across launches.
-
-`TORCHINDUCTOR_AUTOGRAD_CACHE` is not required for inference-only serving.
-
 ## 📚 Citation
 
 If JoyAI-Video-Edit is useful for your research or product prototype, please cite:
