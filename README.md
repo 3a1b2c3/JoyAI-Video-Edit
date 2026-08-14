@@ -19,7 +19,7 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 
 ## 🔥🔥🔥 News!!
 
-- 2026.08.15: 🎉 We are excited to release the live demo of our real-time video editing model—[Try HuggingFace Demo](https://huggingface.co/spaces/wxDai/joyai-video-edit).
+- 2026.08.15: 🎉 Live demo released. **[Try HuggingFace Demo](https://huggingface.co/spaces/wxDai/joyai-video-edit)**
 - 2026.08.05: 🎉 We release the deployment code, [technical report](https://arxiv.org/pdf/2608.03974), and JoyAI-Video-Edit checkpoints. Please check the links above for details.
 
 ## 💎 Highlights
