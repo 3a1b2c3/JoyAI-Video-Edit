@@ -18,7 +18,13 @@ from diffusers.models.attention import FeedForward
 from diffusers.models.embeddings import PixArtAlphaTextProjection, TimestepEmbedding, Timesteps
 
 
-from flash_attn.cute import flash_attn_func as _fa4_func
+# flash-attn v4 (CuTe) is Linux-only -- no Windows wheel. Make it optional: if it
+# can't import, _fa4_func stays None and _flash_attention4() falls back to SDPA
+# (torch's native flash/cuDNN kernel, which works on Windows).
+try:
+    from flash_attn.cute import flash_attn_func as _fa4_func
+except ImportError:
+    _fa4_func = None
 
 
 SOURCE_ID_TARGET = 0.0
