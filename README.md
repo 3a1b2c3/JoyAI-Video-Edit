@@ -49,29 +49,29 @@ https://github.com/user-attachments/assets/bca232c9-75df-46f9-b366-14cfa2651994
     <th>Edited</th>
   </tr>
   <tr>
-    <td><a href="https://github.com/user-attachments/assets/dc7c3cf6-de0b-4b7b-9afe-d4e38c4ea6e1"><img src="assets/cases/case01_source_preview.jpg" width="220" alt="Case 01 source"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/dc7c3cf6-de0b-4b7b-9afe-d4e38c4ea6e1"><img src="assets/cases/case01_source.gif" width="220" alt="Case 01 source"></a></td>
     <td>Transform the people, hairstyles, and interior into a British castle aristocratic style.</td>
-    <td><a href="https://github.com/user-attachments/assets/dbb9b6de-9d63-4879-8418-96610eac79b3"><img src="assets/cases/case01_edited_preview.jpg" width="220" alt="Case 01 edited"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/dbb9b6de-9d63-4879-8418-96610eac79b3"><img src="assets/cases/case01_edited.gif" width="220" alt="Case 01 edited"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/user-attachments/assets/79792d23-7037-43c2-b185-dfd529aac3b7"><img src="assets/cases/case02_source_preview.jpg" width="220" alt="Case 02 source"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/79792d23-7037-43c2-b185-dfd529aac3b7"><img src="assets/cases/case02_source.gif" width="220" alt="Case 02 source"></a></td>
     <td>Turn the video into a watercolor wash style.</td>
-    <td><a href="https://github.com/user-attachments/assets/a20dea9d-715f-45b6-ae1d-b8c694983910"><img src="assets/cases/case02_edited_preview.jpg" width="220" alt="Case 02 edited"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/a20dea9d-715f-45b6-ae1d-b8c694983910"><img src="assets/cases/case02_edited.gif" width="220" alt="Case 02 edited"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/user-attachments/assets/92c1723b-78a6-4b04-837d-21545aeff823"><img src="assets/cases/case03_source_preview.jpg" width="220" alt="Case 03 source"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/92c1723b-78a6-4b04-837d-21545aeff823"><img src="assets/cases/case03_source.gif" width="220" alt="Case 03 source"></a></td>
     <td>Make all dogs white, add colorful hats, and turn the sunglasses hot pink.</td>
-    <td><a href="https://github.com/user-attachments/assets/8412d011-9b08-46c8-820e-ab59e97773d4"><img src="assets/cases/case03_edited_preview.jpg" width="220" alt="Case 03 edited"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/8412d011-9b08-46c8-820e-ab59e97773d4"><img src="assets/cases/case03_edited.gif" width="220" alt="Case 03 edited"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/user-attachments/assets/e9d70802-96e8-4aa4-a577-9e9cf0f8705c"><img src="assets/cases/case04_source_preview.jpg" width="220" alt="Case 04 source"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/e9d70802-96e8-4aa4-a577-9e9cf0f8705c"><img src="assets/cases/case04_source.gif" width="220" alt="Case 04 source"></a></td>
     <td>Dress the girl in a brown down jacket and blue baseball cap.</td>
-    <td><a href="https://github.com/user-attachments/assets/5ae898bd-ee26-4a63-9342-72430c28b82f"><img src="assets/cases/case04_edited_preview.jpg" width="220" alt="Case 04 edited"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/5ae898bd-ee26-4a63-9342-72430c28b82f"><img src="assets/cases/case04_edited.gif" width="220" alt="Case 04 edited"></a></td>
   </tr>
   <tr>
-    <td><a href="https://github.com/user-attachments/assets/b7b5e199-080c-4344-924e-01951fd05912"><img src="assets/cases/case05_source_preview.jpg" width="220" alt="Case 05 source"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/b7b5e199-080c-4344-924e-01951fd05912"><img src="assets/cases/case05_source.gif" width="220" alt="Case 05 source"></a></td>
     <td>Remove the two white cats in pink clothes on both sides.</td>
-    <td><a href="https://github.com/user-attachments/assets/8e1874b8-755c-4bb0-914d-155110501076"><img src="assets/cases/case05_edited_preview.jpg" width="220" alt="Case 05 edited"></a></td>
+    <td><a href="https://github.com/user-attachments/assets/8e1874b8-755c-4bb0-914d-155110501076"><img src="assets/cases/case05_edited.gif" width="220" alt="Case 05 edited"></a></td>
   </tr>
 </table>
 
