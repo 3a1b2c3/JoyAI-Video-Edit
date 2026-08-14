@@ -13,7 +13,7 @@
   <img src="assets/teaser.jpg" width="96%" alt="JoyAI-Video-Edit teaser">
 </p>
 
-JoyAI-Video-Edit is a real-time, instruction-guided video editing system for open-ended video streams. Given a live camera stream or uploaded video and a natural-language edit instruction, it edits frames causally as they arrive, without waiting for the full video, requiring a predefined video length, or revisiting future frames. In our deployment benchmark, the full end-to-end pipeline reaches 30.19 FPS at 720x1280, pushing video editing from offline batch processing toward interactive streaming generation.
+JoyAI-Video-Edit is a real-time, instruction-guided video editing system for open-ended video streams. Given a live camera stream or uploaded video and a natural-language edit instruction, it edits frames causally as they arrive, without waiting for the full video, requiring a predefined video length, or revisiting future frames. In our deployment benchmark, the full end-to-end pipeline reaches 30 FPS at 720 × 1248, pushing video editing from offline batch processing toward interactive streaming generation.
 
 The system combines an MLLM-based condition encoder, a causal video VAE, and a 16B-parameter multimodal diffusion transformer. It is trained and deployed as an autoregressive diffusion editor, then accelerated with aligned autoregressive distribution matching distillation, long-horizon optimization, bounded KV-state inference, and deployment-oriented scheduling to sustain high-throughput 720p editing while reducing train-inference mismatch and accumulated temporal drift.
 
@@ -27,7 +27,7 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 - **Real-time open-ended editing.** Edits live or uploaded videos as frames arrive, without requiring the full sequence upfront.
 - **Diverse instruction control.** Supports subject edits, local edits, background changes, style transfer, motion changes, and reference-guided editing.
 - **Autoregressive diffusion design.** Combines an MLLM condition encoder, causal video VAE, and MMDiT backbone for streaming video editing.
-- **High-throughput 720p deployment.** Reaches 30.19 FPS end-to-end throughput at 720x1280 with bounded KV-state inference and stable per-chunk compute.
+- **High-throughput 720p deployment.** Reaches 30 FPS end-to-end throughput at 720 × 1248 with bounded KV-state inference and stable per-chunk compute.
 
 ## 🚧 TODO
 
