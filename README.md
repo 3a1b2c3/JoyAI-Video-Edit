@@ -5,7 +5,7 @@
   <a href="https://arxiv.org/pdf/2608.03974"><img src="https://img.shields.io/badge/Paper-arXiv-red" alt="Paper"></a>
   <a href="#"><img src="https://img.shields.io/badge/Project-JoyAI--Video--Edit-333399" alt="Project"></a>
   <a href="https://huggingface.co/jdopensource/JoyAI-Video-Edit"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Checkpoint-JoyAI--Video--Edit-yellow" alt="Hugging Face"></a>
-  <a href="https://joyai-labs.jd.com/v2v/"><img src="https://img.shields.io/badge/%F0%9F%9A%80%20Demo-Streaming--V2V-orange" alt="Demo"></a>
+  <a href="https://huggingface.co/spaces/wxDai/joyai-video-edit"><img src="https://img.shields.io/badge/%F0%9F%9A%80%20Demo-Streaming--V2V-orange" alt="Demo"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
 </p>
 
@@ -19,8 +19,8 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 
 ## 🔥🔥🔥 News!!
 
-- 2026.08.06: 🎉 We are excited to release the live demo of our real-time video editing model—try it here: <a href="https://joyai-labs.jd.com/v2v/"><img src="https://img.shields.io/badge/%F0%9F%9A%80%20Demo-Streaming--V2V-orange" alt="Demo"></a>.
-- 2026.08.05: 🎉 We release the deployment code, [technical report](https://arxiv.org/pdf/2608.03974), online demo, and JoyAI-Video-Edit checkpoints. Please check the links above for details.
+- 2026.08.06: 🎉 We are excited to release the live demo of our real-time video editing model—try it here: <a href="https://huggingface.co/spaces/wxDai/joyai-video-edit"><img src="https://img.shields.io/badge/%F0%9F%9A%80%20Demo-Streaming--V2V-orange" alt="Demo"></a>.
+- 2026.08.05: 🎉 We release the deployment code, [technical report](https://arxiv.org/pdf/2608.03974), and JoyAI-Video-Edit checkpoints. Please check the links above for details.
 
 ## 💎 Highlights
 
