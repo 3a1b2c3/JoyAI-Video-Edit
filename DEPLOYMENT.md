@@ -324,7 +324,7 @@ The server defaults to **840×480 @ 24 FPS** (480p). Override per GPU with `JOYO
   JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=24 bash deploy/run_server.sh
   ```
 
-- **RTX PRO 6000** — 480p @ 24 FPS, or native 720p @ 16 FPS:
+- **RTX PRO 6000** — 480p @ 24 FPS, or native 720p @ 16 FPS. The [live HuggingFace demo](https://huggingface.co/spaces/wxDai/joyai-video-edit) runs the 480p @ 24 FPS preset on this GPU:
 
   ```bash
   # 480p @ 24 FPS
