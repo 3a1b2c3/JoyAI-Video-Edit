@@ -558,8 +558,6 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             "kv_reset_frames": args.kv_reset_frames,
             "output_quality": args.output_quality,
             "online_gate": args.online_gate,
-            "person_count_reedit": args.person_count_reedit,
-            "require_face": args.require_face,
             "static_diff_thresh": args.static_diff_thresh,
             "freeze_kv_on_static": args.freeze_kv_on_static,
             "profile_timings": args.profile_timings,
@@ -704,8 +702,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         pe_defer = False
         session_max_inflight = max(0, int(args.max_inflight_chunks or 0))
         presence_monitor = False
-        face_required = bool(args.require_face) and bool(args.online_gate)
-        count_monitor = bool(args.person_count_reedit) and bool(args.online_gate)
+        face_required = False
+        count_monitor = False
 
         fg_score = float(args.face_gate_score)
         fg_min_below = float(args.face_gate_min_below_ratio)
@@ -1216,11 +1214,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
                         face_required = bool(args.online_gate) and bool(payload.get("require_face", True))
 
-                        count_monitor = (
-                            bool(args.person_count_reedit) and
-                            bool(args.online_gate) and
-                            bool(payload.get("person_count_reedit", True))
-                        )
+                        count_monitor = bool(args.online_gate) and bool(payload.get("person_count_reedit", True))
 
                         fg_score = float(payload.get("fg_score", args.face_gate_score))
                         fg_min_below = float(payload.get("fg_min_below_ratio", args.face_gate_min_below_ratio))
@@ -1791,8 +1785,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--presence-return-frames", type=int, default=24, help="Consecutive present (body+face) frames required to LEAVE the black-hold and re-run the startup gate. Separate from --presence-absent-frames so entry stays fast (black out quickly) while exit is well de-bounced: a face flickering through finger gaps while hands cover the face won't bounce no_face<->settling. ~24fps, 24 ≈ 1s.")
     parser.add_argument("--person-count-change-frames", type=int, default=24, help="Consecutive frames a NEW face count must hold before re-editing (reset chunk0) so people who enter later get edited. Debounce vs transient miscounts (sway / motion blur / a background face flickering in). ~24fps, 24 ≈ 1s.")
     parser.add_argument("--count-face-min-ratio", type=float, default=0.45, help="For person-count-change: a face counts as an additional subject only if its short side is >= this fraction of the MAIN (largest/foreground) face's short side. Excludes far-smaller BACKGROUND people (e.g. a coworker behind the subject) that otherwise flip the count and trigger spurious re-edits. Higher = stricter (ignore more background). Default 0.45.")
-    parser.add_argument("--person-count-reedit", action=argparse.BooleanOptionalAction, default=True, help="Re-edit (reset chunk0) when the head count changes -- ALL modes incl. style. --no-person-count-reedit to disable.")
-    parser.add_argument("--require-face", action=argparse.BooleanOptionalAction, default=True, help="Also black-hold when a body is present but NO face is detected (hand over face / turned away). --no-require-face to only gate on body.")
     parser.add_argument("--person-detector-onnx", type=str, default=DEFAULT_PERSON_DETECTOR_ONNX, help="YOLOv8n ONNX (fixed 320) for mid-session person presence via cv2.dnn. Missing -> passthrough disabled (edits always run).")
     parser.add_argument("--person-gate-conf", type=float, default=0.4, help="Min YOLO person-class score to count the person as present.")
     parser.add_argument("--person-check-stride", type=int, default=2, help="Run the person detector every Nth frame during editing (YOLO ~27ms; stride amortizes the cost). Smaller = faster stop/resume detection, more CPU.")
