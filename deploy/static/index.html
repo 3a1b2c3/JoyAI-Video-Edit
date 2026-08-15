@@ -243,7 +243,8 @@
       <span id="upqTier" class="qtier">
         <button type="button" data-upq="0.2" data-i18n="q_low">低</button>
         <button type="button" data-upq="0.4" data-i18n="q_mid">中</button>
-        <button type="button" data-upq="0.6" class="on" data-i18n="q_high">高</button>
+        <button type="button" data-upq="0.6" data-i18n="q_high">高</button>
+        <button type="button" data-upq="auto" class="on" data-i18n="q_auto">自动</button>
       </span>
     </span>
     <span class="kvreset-field keep-min">
@@ -353,6 +354,7 @@ const I18N = {
     stage_q_enc: "排队·编码", stage_q_dit: "排队·DiT", stage_q_dec: "排队·解码",
     stage_q_pseudo: "排队·伪编码", stage_q_post: "排队·后处理",
     stage_ws: "WS 发送", stage_total: "服务端合计", stage_residence: "服务端驻留",
+    stage_enc_q: "编码队列", stage_ws_buf: "发送缓冲", stage_recv_q: "接收队列",
     busy_released: "已释放", busy_disconnected: "已断开", busy_conn_err: "连接错误",
     pe_fallback: " 回退", pe_error: " 错误",
     reset_count_changed: "检测到人数变化，重新编辑",
@@ -364,8 +366,9 @@ const I18N = {
     toast_finalizing: "✨ 编辑完成，正在生成可下载视频",
     edit_processing: "✨ 正在编辑",
     q_downgrade_auto: " · 已自动降到低画质", q_downgrade_hint: " · 建议降低画质",
+    flow_drop_tail: " · 带宽不足，正在丢帧保延迟",
+    up_clamp_tail: " · 上行带宽不足，已临时降低上传画质",
     res_notice: "本演示运行在 {res}，并非模型原生的 720×1248 分辨率",
-    gpu_wait: "正在等待 GPU（ZeroGPU 共享算力，需排队与预热），请稍候",
   },
   en: {
     tagline: "Streaming video editing",
@@ -412,6 +415,7 @@ const I18N = {
     stage_q_enc: "Queue·encode", stage_q_dit: "Queue·DiT", stage_q_dec: "Queue·decode",
     stage_q_pseudo: "Queue·pseudo", stage_q_post: "Queue·post",
     stage_ws: "WS send", stage_total: "Server total", stage_residence: "Server residence",
+    stage_enc_q: "Encode queue", stage_ws_buf: "Send buffer", stage_recv_q: "Recv queue",
     busy_released: "Released", busy_disconnected: "Disconnected", busy_conn_err: "Connection error",
     pe_fallback: " fallback", pe_error: " error",
     reset_count_changed: "Person count changed, re-editing",
@@ -423,8 +427,9 @@ const I18N = {
     toast_finalizing: "✨ Done — generating the downloadable video",
     edit_processing: "✨ Editing",
     q_downgrade_auto: " · auto-lowered to low quality", q_downgrade_hint: " · consider lowering quality",
+    flow_drop_tail: " · bandwidth limited, dropping frames",
+    up_clamp_tail: " · uplink limited, upload quality lowered",
     res_notice: "This demo runs at {res}, not the model's native 720×1248 resolution",
-    gpu_wait: "Waiting for GPU (shared ZeroGPU, queue + warmup), please hold",
   },
 };
 let currentLang = localStorage.getItem("joyomni_lang") || "en";
@@ -686,6 +691,25 @@ let editReceiveLatencyLastMs = null;
 let editLatencyLastMs = null;
 let netRttLastMs = null;
 let netPingTimer = null;
+let flowDropTotal = 0;
+let flowDropAt = 0;
+let upDelayMs = null;
+let upDelayHist = [];
+let downDelayMs = null;
+let downSkewMin = null;
+let downSkewAt = 0;
+let upClamped = false;
+let upAuto = true;
+let upClearStreak = 0;
+let upClearNeed = 4;
+let upDrainFactor = 1;
+let upDrainHigh = 0;
+let upDrainClear = 0;
+let upDrainNeed = 5;
+let upSkipCounter = 0;
+let upDropTotal = 0;
+let upDropAt = 0;
+let upResumeKeyframe = false;
 let serverChunkLastSec = null;
 let chunkProfileLast = null;
 let sessionProfileTimings = false;
@@ -780,7 +804,7 @@ function startNetPingTimer() {
   if (netPingTimer) clearInterval(netPingTimer);
   netPingTimer = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(JSON.stringify({ type: "ping", t: Date.now() })); } catch (err) {}
+      try { ws.send(JSON.stringify({ type: "ping", t: Date.now(), recv: receivedFrames, rtt: netRttLastMs })); } catch (err) {}
     }
     autoQualityTick();
   }, 1000);
@@ -905,6 +929,13 @@ function renderStageTimings() {
   const cards = [];
   const push = (label, key, tone = "") => cards.push(statCell(label, fmt(ms(key), "ms"), tone));
 
+  const _encQ = (typeof upEncoder !== "undefined" && upEncoder) ? (upEncoder.encodeQueueSize || 0) : 0;
+  const _wsBuf = (ws && ws.readyState === WebSocket.OPEN) ? (ws.bufferedAmount || 0) : 0;
+  cards.push(statCell(t("stage_enc_q"), String(_encQ), _encQ >= 3 ? "warn" : ""));
+  cards.push(statCell(t("stage_ws_buf"), (_wsBuf / 1024).toFixed(0) + " KB", _wsBuf > 131072 ? "warn" : ""));
+  const _recvQ = (typeof outputFrameQueue !== "undefined" && outputFrameQueue) ? outputFrameQueue.length : 0;
+  cards.push(statCell(t("stage_recv_q"), _recvQ + " · " + (outCodecH264 ? "h264" : "mjpeg"), _recvQ >= 16 ? "warn" : ""));
+
   if (Number.isFinite(Number(p.jpeg_decode_ms))) {
     cards.push(statCell(t("stage_jpeg"), fmt(Number(p.jpeg_decode_ms), "ms")));
   }
@@ -932,10 +963,16 @@ function updateMetrics() {
   if (netReadoutEl) {
     const _rtt = netRttLastMs;
     const _hi = _rtt !== null && _rtt !== undefined && _rtt > 300;
-    const _tail = _hi ? (autoQuality ? t("q_downgrade_auto") : t("q_downgrade_hint")) : "";
+    const _fd = flowDropAt > 0 && Date.now() - flowDropAt < 3000;
+    const _uc = upClamped || upDrainFactor < 1 || (upDropAt > 0 && Date.now() - upDropAt < 3000);
+    let _tail = "";
+    if (_hi) _tail = autoQuality ? (autoQTier < 2 ? t("q_downgrade_auto") : "") : t("q_downgrade_hint");
+    if (_uc) _tail = t("up_clamp_tail");
+    if (_fd) _tail = t("flow_drop_tail");
     netReadoutEl.textContent = t("net_label") + " " + fmt(_rtt, "ms") + _tail;
-    netReadoutEl.classList.toggle("net-warn", _hi);
+    netReadoutEl.classList.toggle("net-warn", _hi || _fd || _uc);
   }
+  if (upAuto) highlightUpqTier("auto");
   if (dispLatencyEl) {
     dispLatencyEl.textContent = t("disp_label") + " " + fmt(editLatencyLastMs, "ms");
   }
@@ -1075,6 +1112,16 @@ function resetRunMetrics() {
   editReceiveLatencyLastMs = null;
   editLatencyLastMs = null;
   netRttLastMs = null;
+  upDelayMs = null;
+  upDelayHist = [];
+  downDelayMs = null;
+  downSkewMin = null;
+  downSkewAt = 0;
+  upClearStreak = 0;
+  upDrainHigh = 0;
+  upDrainClear = 0;
+  upDrainNeed = 5;
+  upResumeKeyframe = false;
   serverChunkLastSec = null;
   chunkProfileLast = null;
   lastWsSendMs = null;
@@ -1126,11 +1173,71 @@ const UPLINK_KEYFRAME_INTERVAL = 8;
 let upSeq = 0;
 const upPendingByTs = new Map();
 
+const UP_CLAMP_Q = 0.2;
+
+function effectiveUpQuality() {
+  const q = Number(document.getElementById("quality").value) || 0.4;
+  return upClamped ? Math.min(q, UP_CLAMP_Q) : q;
+}
+
 function upEncoderBitrate(width, height) {
   const REF_PX = 1248 * 720;
-  const REF_BITRATE = (Number(document.getElementById("quality").value) || 0.4) * 4000000;
+  const REF_BITRATE = (effectiveUpQuality() || 0.4) * 4000000 * upDrainFactor;
   const REF_FPS = 16;
   return Math.round(REF_BITRATE * (width * height / REF_PX) * Math.sqrt(sendTargetFps() / REF_FPS));
+}
+
+function uplinkCongestionTick() {
+  if (!(ws && ws.readyState === WebSocket.OPEN && sessionGranted)) return;
+  if (usingVideoFile) return;
+  const buf = ws.bufferedAmount || 0;
+  const upLow = upDelayHist.length
+    ? Math.min.apply(null, upDelayHist.slice(-3))
+    : null;
+  const congested = (upLow !== null && upLow > 350) || buf > 262144;
+  if (!upClamped) {
+    if (congested && effectiveUpQuality() > UP_CLAMP_Q + 0.001) {
+      upClamped = true;
+      upClearStreak = 0;
+      upClearNeed = Math.min(60, upClearNeed * 2);
+      try { resetUplinkEncoder(); } catch (e) {}
+      updateMetrics();
+    }
+  } else {
+    const clear = (upLow === null || upLow < 120) && buf < 65536;
+    upClearStreak = clear ? upClearStreak + 1 : 0;
+    if (upClearStreak >= upClearNeed) {
+      upClamped = false;
+      upClearStreak = 0;
+      try { resetUplinkEncoder(); } catch (e) {}
+      updateMetrics();
+    }
+  }
+  if (upLow !== null && upLow > 600) {
+    upDrainClear = 0;
+    upDrainHigh += 1;
+    if (upDrainHigh >= 3 && upDrainFactor > 0.25) {
+      upDrainFactor /= 2;
+      upDrainHigh = 0;
+      try { resetUplinkEncoder(); } catch (e) {}
+      updateMetrics();
+    }
+  } else if ((upLow === null || upLow < 200) && buf < 65536) {
+    upDrainHigh = 0;
+    if (upDrainFactor < 1) {
+      upDrainClear += 1;
+      if (upDrainClear >= upDrainNeed) {
+        upDrainFactor = Math.min(1, upDrainFactor * 2);
+        upDrainClear = 0;
+        upDrainNeed = Math.min(15, upDrainNeed * 2);
+        try { resetUplinkEncoder(); } catch (e) {}
+        updateMetrics();
+      }
+    }
+  } else {
+    upDrainHigh = 0;
+    upDrainClear = 0;
+  }
 }
 
 function upEncoderConfig(width, height) {
@@ -1161,6 +1268,12 @@ function ensureUplinkEncoder(width, height) {
       const info = upPendingByTs.get(chunk.timestamp);
       upPendingByTs.delete(chunk.timestamp);
       if (!info || !ws || ws.readyState !== WebSocket.OPEN) return;
+      if ((ws.bufferedAmount || 0) > 786432) {
+        upDropTotal += 1;
+        upDropAt = Date.now();
+        upResumeKeyframe = true;
+        return;
+      }
       const buf = new ArrayBuffer(chunk.byteLength);
       chunk.copyTo(buf);
       try {
@@ -1179,12 +1292,20 @@ function ensureUplinkEncoder(width, height) {
 }
 
 function encodeUplinkFrame(width, height) {
+  upSkipCounter += 1;
+  const _mod = upDrainFactor <= 0.25 ? 3 : (upDrainFactor <= 0.5 ? 2 : 1);
+  if (_mod > 1 && (upSkipCounter % _mod) !== 0) return;
   drawCaptureFrame(width, height);
   ensureUplinkEncoder(width, height);
   const seq = ++upSeq;
   upPendingByTs.set(seq, { seq, t_capture_ms: Date.now() });
+  let forceKey = false;
+  if (upResumeKeyframe && ws && (ws.bufferedAmount || 0) < 131072) {
+    forceKey = true;
+    upResumeKeyframe = false;
+  }
   const vf = new VideoFrame(capture, { timestamp: seq });
-  upEncoder.encode(vf, { keyFrame: seq === 1 || seq % UPLINK_KEYFRAME_INTERVAL === 0 });
+  upEncoder.encode(vf, { keyFrame: forceKey || seq === 1 || seq % UPLINK_KEYFRAME_INTERVAL === 0 });
   vf.close();
 }
 
@@ -1545,7 +1666,7 @@ async function beginSession() {
     input_codec: upCodecH264 ? "h264" : "mjpeg",
     no_person_blank: faceGateDebugEnabled(),
     require_face: faceGateDebugEnabled(),
-    person_count_reedit: faceGateDebugEnabled()
+    person_count_reedit: false
   };
   if (usingVideoFile) {
     startPayload.source = "file";
@@ -1593,7 +1714,6 @@ async function start() {
       if (msg.type === "queue_position") {
         const ahead = Number(msg.ahead != null ? msg.ahead : msg.position) || 0;
         setSendBusy(true, t("busy_queue") + ahead);
-        showOutputStart(true, t("gpu_wait") + (ahead > 0 ? " · " + t("busy_queue") + ahead : ""));
         return;
       }
       if (msg.type === "session_granted") {
@@ -1643,8 +1763,29 @@ async function start() {
         const t = Number(msg.t);
         if (Number.isFinite(t)) {
           netRttLastMs = Math.max(0, Date.now() - t);
-          updateMetrics();
         }
+        const up = Number(msg.up_ms);
+        upDelayMs = Number.isFinite(up) ? up : null;
+        if (upDelayMs !== null) {
+          upDelayHist.push(upDelayMs);
+          if (upDelayHist.length > 4) upDelayHist.shift();
+        }
+        const ts = Number(msg.ts);
+        if (Number.isFinite(ts)) {
+          let skew = Date.now() - ts;
+          if (downSkewMin !== null) downSkewMin += 0.5 * Math.max(0, Date.now() - downSkewAt) / 1000;
+          if (downSkewMin === null || skew < downSkewMin) downSkewMin = skew;
+          downSkewAt = Date.now();
+          downDelayMs = Math.max(0, skew - downSkewMin);
+        }
+        uplinkCongestionTick();
+        updateMetrics();
+        return;
+      }
+      if (msg.type === "flow_drop") {
+        flowDropTotal = Number(msg.dropped_total) || (flowDropTotal + 1);
+        flowDropAt = Date.now();
+        updateMetrics();
         return;
       }
       if (msg.type === "output_frame") {
@@ -1757,6 +1898,7 @@ async function start() {
         return;
       }
       if (msg.type === "chunk_done") {
+        try { ws.send(JSON.stringify({ type: "ack", recv: receivedFrames })); } catch (err) {}
         if (
           chunkProfileLast &&
           (msg.ws_send_s !== undefined || msg.server_residence_s !== undefined) &&
@@ -1782,6 +1924,9 @@ async function start() {
     const meta = pendingOutputMeta;
     pendingOutputMeta = null;
     receivedFrames += 1;
+    if (receivedFrames % 4 === 0) {
+      try { ws.send(JSON.stringify({ type: "ack", recv: receivedFrames })); } catch (err) {}
+    }
     receivedFramesWindow += 1;
     if (meta) {
       const latency = Date.now() - Number(meta.t_capture_ms || Date.now());
@@ -2392,26 +2537,31 @@ for (const id of ["width", "height", "cameraFps", "fps", "quality", "steps", "us
   document.getElementById(id).addEventListener("input", updateMetrics);
   document.getElementById(id).addEventListener("change", updateMetrics);
 }
-const upqTierEl = document.getElementById("upqTier");
+var upqTierEl = document.getElementById("upqTier");
 const qualityLegacyEl = document.getElementById("quality");
 function highlightUpqTier(v) {
   if (!upqTierEl) return;
   for (const b of upqTierEl.querySelectorAll("button")) {
-    b.classList.toggle("on", Number(b.getAttribute("data-upq")) === Number(v));
+    const bv = b.getAttribute("data-upq");
+    b.classList.toggle("on", bv === String(v) || (v !== "auto" && Number(bv) === Number(v)));
+    b.classList.remove("auto-active");
+  }
+  if (v === "auto") {
+    const cur = effectiveUpQuality();
+    for (const b of upqTierEl.querySelectorAll("button")) {
+      if (Number(b.getAttribute("data-upq")) === Number(cur)) b.classList.add("auto-active");
+    }
   }
 }
 function syncUpQualityUi() {
-  if (qualityLegacyEl) highlightUpqTier(qualityLegacyEl.value);
+  highlightUpqTier(upAuto ? "auto" : (qualityLegacyEl ? qualityLegacyEl.value : "0.4"));
 }
 function autoUpQuality() {
+  if (!upAuto) return;
   const qEl = document.getElementById("quality");
   if (!qEl) return;
-  const w = Number(document.getElementById("width").value) || 0;
-  const h = Number(document.getElementById("height").value) || 0;
-  const q = (w * h > 840 * 480 || sendTargetFps() > 24) ? 0.4 : 0.6;
-  qEl.value = q;
-  const tier = document.getElementById("upqTier");
-  if (tier) for (const b of tier.querySelectorAll("button")) b.classList.toggle("on", Number(b.getAttribute("data-upq")) === q);
+  qEl.value = 0.6;
+  highlightUpqTier("auto");
 }
 for (const id of ["width", "height", "fps"]) {
   const el = document.getElementById(id);
@@ -2421,8 +2571,14 @@ if (upqTierEl) {
   for (const b of upqTierEl.querySelectorAll("button")) {
     b.addEventListener("click", () => {
       const v = b.getAttribute("data-upq");
-      if (qualityLegacyEl) qualityLegacyEl.value = v;
-      highlightUpqTier(v);
+      if (v === "auto") {
+        upAuto = true;
+        autoUpQuality();
+      } else {
+        upAuto = false;
+        if (qualityLegacyEl) qualityLegacyEl.value = v;
+        highlightUpqTier(v);
+      }
       resetUplinkEncoder();
       updateMetrics();
     });
@@ -2491,7 +2647,7 @@ if (fpsTierEl) {
 function autoQualityTick() {
   if (!autoQuality) return;
   if (!(ws && ws.readyState === WebSocket.OPEN && sessionGranted)) return;
-  const rtt = netRttLastMs;
+  const rtt = (downDelayMs !== null && downDelayMs !== undefined) ? downDelayMs : netRttLastMs;
   if (rtt === null || rtt === undefined) return;
   if (autoQHoldTicks > 0) autoQHoldTicks--;
   let target = autoQTier;
