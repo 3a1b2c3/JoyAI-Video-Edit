@@ -6,10 +6,49 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+PYTHON_REQUIRED="3.11"  # Force Python 3.11 (NOT 3.12 on Windows)
+
 echo ""
 echo "╔════════════════════════════════════════════════════════════════════╗"
 echo "║                    DiT Inference Complete Setup                    ║"
 echo "╚════════════════════════════════════════════════════════════════════╝"
+echo ""
+
+# Find Python (use what's available)
+echo "Finding Python installation..."
+PYTHON=""
+for py_cmd in python3 python python.exe; do
+    if command -v $py_cmd &> /dev/null; then
+        PYTHON=$py_cmd
+        break
+    fi
+done
+
+if [ -z "$PYTHON" ]; then
+    echo "❌ Python not found in PATH"
+    exit 1
+fi
+
+PYTHON_PATH=$($PYTHON -c "import sys; print(sys.executable)")
+PYTHON_VERSION=$($PYTHON -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+
+echo "  Using: $PYTHON_PATH"
+echo "  Version: Python $PYTHON_VERSION"
+
+# Warn if Python is old/new, but don't block
+MAJOR=$($PYTHON -c 'import sys; print(sys.version_info.major)')
+MINOR=$($PYTHON -c 'import sys; print(sys.version_info.minor)')
+
+if [ "$MAJOR" -ne 3 ]; then
+    echo "  ⚠ Python 3 required (you have $MAJOR.x)"
+elif [ "$MINOR" -lt 10 ]; then
+    echo "  ⚠ Python 3.10+ recommended (you have 3.$MINOR)"
+elif [ "$MINOR" -gt 11 ]; then
+    echo "  ⚠ Python 3.12+ may have issues on Windows (you have 3.$MINOR)"
+else
+    echo "  ✅ Python version OK"
+fi
+
 echo ""
 
 # Step 1: Setup venv

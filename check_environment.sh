@@ -6,13 +6,21 @@ echo "Environment Check for DiT Inference"
 echo "========================================================================"
 echo ""
 
-# Check Python
+# Find and check Python
 echo "[1/5] Python:"
-if command -v python &> /dev/null; then
-    python --version
-    python -c "import sys; print('  Location:', sys.executable)"
-else
+PYTHON=""
+for py_cmd in python3 python python.exe; do
+    if command -v $py_cmd &> /dev/null; then
+        PYTHON=$py_cmd
+        break
+    fi
+done
+
+if [ -z "$PYTHON" ]; then
     echo "  ❌ Python not found"
+else
+    $PYTHON --version
+    $PYTHON -c "import sys; print('  Location:', sys.executable)"
 fi
 echo ""
 

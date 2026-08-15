@@ -6,6 +6,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKPOINT_DIR="$SCRIPT_DIR/deploy/deps/checkpoints"
 
+# Find Python
+PYTHON=""
+for py_cmd in python3 python python.exe; do
+    if command -v $py_cmd &> /dev/null; then
+        PYTHON=$py_cmd
+        break
+    fi
+done
+
 echo "========================================================================"
 echo "Checkpoint Setup"
 echo "========================================================================"
@@ -52,25 +61,28 @@ if [ -f "$DIT_PATH" ] && [ -f "$VAE_PATH/config.json" ]; then
     echo "You can now run inference:"
     echo "  bash run_inference.sh"
 else
-    echo "⚠ Missing checkpoints. Please download:"
+    echo "⚠ Missing checkpoints"
+    echo ""
+    echo "Place checkpoint files at:"
     echo ""
 
     if [ ! -f "$DIT_PATH" ]; then
         echo "1. DiT Checkpoint (28-30 GB)"
-        echo "   Name: joyai_video_edit_dit_0804.pth"
+        echo "   File: joyai_video_edit_dit_0804.pth"
         echo "   Path: $DIT_PATH"
-        echo "   Download from: [Your model source]"
         echo ""
     fi
 
     if [ ! -f "$VAE_PATH/config.json" ]; then
         echo "2. VAE Checkpoint"
         echo "   Path: $VAE_PATH"
-        echo "   Download from: [Your VAE source]"
+        echo "   Files:"
+        echo "     - config.json"
+        echo "     - diffusion_pytorch_model.bin"
         echo ""
     fi
 
-    echo "After downloading, verify with:"
+    echo "After placing files, verify with:"
     echo "  bash check_environment.sh"
 fi
 
@@ -81,9 +93,8 @@ echo "========================================================================"
 echo ""
 echo "deploy/deps/checkpoints/"
 echo "├── JoyAI-Video-Edit/"
-echo "│   ├── dit/"
-echo "│   │   └── dit/"
-echo "│   │       └── joyai_video_edit_dit_0804.pth (28-30 GB)"
+echo "│   ├── dit/dit/"
+echo "│   │   └── joyai_video_edit_dit_0804.pth (28-30 GB)"
 echo "│   └── vae/"
 echo "│       ├── config.json"
 echo "│       └── diffusion_pytorch_model.bin"

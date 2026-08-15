@@ -11,15 +11,24 @@ echo "Setting Up Virtual Environment"
 echo "========================================================================"
 echo ""
 
-# Check Python version
-echo "[1/4] Checking Python..."
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 not found. Please install Python 3.10+"
+# Find Python
+echo "[1/4] Finding Python..."
+PYTHON=""
+for py_cmd in python3 python python.exe; do
+    if command -v $py_cmd &> /dev/null; then
+        PYTHON=$py_cmd
+        break
+    fi
+done
+
+if [ -z "$PYTHON" ]; then
+    echo "❌ Python not found in PATH"
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 --version | awk '{print $2}')
-echo "  ✅ Python $PYTHON_VERSION found"
+PYTHON_VERSION=$($PYTHON --version | awk '{print $2}')
+PYTHON_PATH=$($PYTHON -c "import sys; print(sys.executable)")
+echo "  ✅ Found Python $PYTHON_VERSION at $PYTHON_PATH"
 echo ""
 
 # Create venv
@@ -27,7 +36,7 @@ echo "[2/4] Creating virtual environment..."
 if [ -d ".venv" ]; then
     echo "  ℹ .venv already exists, skipping creation"
 else
-    python3 -m venv .venv
+    $PYTHON -m venv .venv
     echo "  ✅ Virtual environment created"
 fi
 echo ""
