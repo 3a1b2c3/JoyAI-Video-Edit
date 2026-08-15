@@ -35,6 +35,7 @@ from xvideo.serving.joyomni_streaming import (
 DEFAULT_DIT_CKPT = ""
 DEFAULT_FACE_DETECTOR_ONNX = str(REPO_ROOT / "deps" / "checkpoints" / "face_detection_yunet_2023mar.onnx")
 DEFAULT_PERSON_DETECTOR_ONNX = str(REPO_ROOT / "deps" / "checkpoints" / "yolov8n.onnx")
+FACE_DETECTOR_DOWNSAMPLE = 1.5
 
 
 class SessionGate:
@@ -127,23 +128,34 @@ class _H264Stream:
         self._enc = None
         self._size: tuple[int, int] | None = None
         self._crf = self.crf_for_quality(quality)
+        self._want_crf = self._crf
+        self._want_reset = False
 
     @staticmethod
     def crf_for_quality(quality: int) -> int:
         return max(15, min(30, round((35 - int(quality) / 4) / 5) * 5))
 
     def set_quality(self, quality: int) -> None:
-        crf = self.crf_for_quality(quality)
-        if crf != self._crf:
-            self._crf = crf
-            self._enc = None
+        self._want_crf = self.crf_for_quality(quality)
+
+    def reset(self) -> None:
+        self._want_reset = True
 
     def encode(self, frames: list) -> list[tuple[bytes, bool]]:
         import av
         import cv2
 
         h, w = frames[0].shape[:2]
-        if self._enc is None or self._size != (w, h):
+        want_crf = int(self._want_crf)
+        if (
+            self._enc is None
+            or self._size != (w, h)
+            or self._want_reset
+            or want_crf != self._crf
+        ):
+            self._want_reset = False
+            self._crf = want_crf
+            self._enc = None
             enc = av.CodecContext.create("libx264", "w")
             enc.width = w
             enc.height = h
@@ -212,10 +224,15 @@ def _check_face_gate(image: Image.Image, *, onnx_path: str,
     det = _get_face_detector(onnx_path, score_thresh)
     if det is None:
         return (None, None, 0)
+    import cv2
     import numpy as np
     rgb = np.asarray(image if image.mode == "RGB" else image.convert("RGB"))
     bgr = np.ascontiguousarray(rgb[:, :, ::-1])
     h, w = bgr.shape[:2]
+    if FACE_DETECTOR_DOWNSAMPLE > 1.0:
+        _s = 1.0 / FACE_DETECTOR_DOWNSAMPLE
+        bgr = cv2.resize(bgr, (max(2, int(round(w * _s))), max(2, int(round(h * _s)))), interpolation=cv2.INTER_AREA)
+        h, w = bgr.shape[:2]
     det.setScoreThreshold(float(score_thresh))
     det.setInputSize((w, h))
     _, faces = det.detect(bgr)
@@ -724,6 +741,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         h264_stream: _H264Stream | None = None
         input_codec = "mjpeg"
         h264_ingest: _H264Ingest | None = None
+        input_sniffed = False
         max_temporal_ids = args.max_temporal_ids
         freeze_kv_on_static = args.freeze_kv_on_static
         static_diff_thresh = args.static_diff_thresh
@@ -733,6 +751,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         send_lock = asyncio.Lock()
         stop_output_pump = asyncio.Event()
         output_task: asyncio.Task[None] | None = None
+
+        flow = {"recv": None, "rtt": None, "at": 0.0, "dropped": 0, "congested": False,
+                "base": 0, "has_ack": False, "probe": 0, "clamped": False,
+                "skew_min": None, "skew_at": 0.0, "up_ms": 0.0,
+                "consec": 0}
 
 
         rec_input: _SegmentedRecorder | None = None
@@ -780,6 +803,75 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             count = len(encoded_frames)
             if not source_metas:
                 source_metas = [{} for _ in range(count)]
+
+            _wire_chunk = h264_stream is not None or (
+                encoded_frames and isinstance(encoded_frames[0], (bytes, bytearray))
+            )
+            _fps = float(getattr(session_settings, "fps", None) or args.fps or 24.0)
+            _outstanding = None
+            if _wire_chunk and flow["recv"] is not None and (time.time() - flow["at"]) < 5.0:
+                _outstanding = max(0, (frames_out - int(flow.get("base") or 0)) - int(flow["recv"]))
+            if _outstanding is not None:
+                _report_age = time.time() - flow["at"]
+                _slack = 0 if flow.get("has_ack") else int(_report_age * _fps)
+                _up_credit = int(min(float(flow.get("up_ms") or 0.0), 3000.0) * _fps / 1000.0)
+                _adj = max(0, _outstanding - _slack - _up_credit)
+                _hi = max(2 * count + 4, int(_fps * 0.8))
+                _lo = max(count, int(_fps * 0.35))
+                _drop = False
+                if flow["congested"]:
+                    if _adj <= _lo:
+                        flow["congested"] = False
+                        flow["probe"] = 8
+                        flow["consec"] = 0
+                    else:
+                        _drop = True
+                elif _adj >= _hi:
+                    flow["congested"] = True
+                    _drop = True
+                    if h264_stream is not None and not flow.get("clamped"):
+                        flow["clamped"] = True
+                        h264_stream.set_quality(min(int(output_quality), 20))
+                if not _drop and flow.get("probe", 0) > 0:
+                    if _adj > max(2, count // 2):
+                        _drop = True
+                    else:
+                        flow["probe"] -= 1
+                        if flow["probe"] <= 0 and flow.get("clamped") and h264_stream is not None:
+                            flow["clamped"] = False
+                            h264_stream.set_quality(int(output_quality))
+                if _drop:
+                    if flow.get("consec", 0) >= 3:
+                        _drop = False
+                        flow["consec"] = 0
+                    else:
+                        flow["consec"] = flow.get("consec", 0) + 1
+                else:
+                    flow["consec"] = 0
+                ws_debug["flow_outstanding"] = _outstanding
+                ws_debug["flow_adj"] = _adj
+                ws_debug["flow_up_ms"] = round(float(flow.get("up_ms") or 0.0), 1)
+                ws_debug["flow_congested"] = bool(flow["congested"])
+                if _drop:
+                    flow["dropped"] += 1
+                    ws_debug["chunks_dropped_congestion"] = flow["dropped"]
+                    if h264_stream is not None:
+                        h264_stream.reset()
+                    _rec_o = rec_output
+                    if _rec_o is not None and encoded_frames:
+                        for _i, _enc in enumerate(encoded_frames):
+                            _m = source_metas[min(_i, len(source_metas) - 1)]
+                            _rec_o.submit(_enc, _m.get("t_capture_ms"))
+                            ws_debug["rec_out_written"] = _rec_o.frames_written
+                            ws_debug["rec_out_dropped"] = _rec_o.frames_dropped_recording
+                    async with send_lock:
+                        await websocket.send_json({
+                            "type": "flow_drop",
+                            "count": count,
+                            "outstanding": _outstanding,
+                            "dropped_total": flow["dropped"],
+                        })
+                    return 0
 
             _prof = bool(profile.get("profile_timings"))
             _send_t0 = time.perf_counter() if _prof else 0.0
@@ -1183,10 +1275,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         lossless_mode = str(payload.get("source", "")) == "file"
                         _up_allow = args.uplink_codec == "auto" and not lossless_mode
                         _dn_allow = args.downlink_codec == "auto" and not lossless_mode
-                        output_codec = "h264" if payload.get("output_codec") == "h264" and _dn_allow else "mjpeg"
+                        output_codec = "h264" if payload.get("output_codec", "h264") == "h264" and _dn_allow else "mjpeg"
                         h264_stream = _H264Stream(output_quality) if output_codec == "h264" else None
-                        input_codec = "h264" if payload.get("input_codec") == "h264" and _up_allow else "mjpeg"
+                        input_codec = "h264" if payload.get("input_codec", "h264") == "h264" and _up_allow else "mjpeg"
                         h264_ingest = _H264Ingest() if input_codec == "h264" else None
+                        input_sniffed = False
                         if app.state.runtime is not None:
                             app.state.runtime.output_quality = output_quality
                             app.state.runtime.lossless_output = lossless_mode
@@ -1211,6 +1304,13 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         use_pe = bool(payload.get("use_pe", args.use_pe)) and bool(os.environ.get("OPENAI_API_KEY"))
 
                         face_gate_pending = bool(payload.get("gate_enabled", True))
+                        flow["recv"] = None
+                        flow["at"] = 0.0
+                        flow["congested"] = False
+                        flow["probe"] = 0
+                        flow["clamped"] = False
+                        flow["consec"] = 0
+                        flow["base"] = frames_out
 
                         presence_monitor = bool(args.online_gate) and bool(
                             payload.get("no_person_blank", True)
@@ -1358,8 +1458,53 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                             "seq": int(payload.get("seq", frames_in + 1)),
                             "t_capture_ms": float(payload.get("t_capture_ms", time.time() * 1000.0)),
                         }
+                    elif msg_type == "ack":
+                        _recv = payload.get("recv")
+                        if _recv is not None:
+                            try:
+                                flow["recv"] = int(_recv)
+                                flow["at"] = time.time()
+                                flow["has_ack"] = True
+                            except (TypeError, ValueError):
+                                pass
+                        continue
                     elif msg_type == "ping":
-                        await _send_json({"type": "pong", "t": payload.get("t")})
+                        _recv = payload.get("recv")
+                        if _recv is not None:
+                            try:
+                                flow["recv"] = int(_recv)
+                                flow["at"] = time.time()
+                            except (TypeError, ValueError):
+                                pass
+                        _rtt = payload.get("rtt")
+                        if _rtt is not None:
+                            try:
+                                flow["rtt"] = float(_rtt)
+                            except (TypeError, ValueError):
+                                pass
+                        _up_ms = None
+                        _t = payload.get("t")
+                        if _t is not None:
+                            try:
+                                _now = time.time()
+                                _skew = _now * 1000.0 - float(_t)
+                                _smin = flow.get("skew_min")
+                                if _smin is not None:
+                                    _smin += 0.5 * max(0.0, _now - float(flow.get("skew_at") or _now))
+                                if _smin is None or _skew < _smin:
+                                    _smin = _skew
+                                flow["skew_min"] = _smin
+                                flow["skew_at"] = _now
+                                _up_ms = max(0.0, _skew - _smin)
+                                flow["up_ms"] = _up_ms
+                            except (TypeError, ValueError):
+                                pass
+                        await _send_json({
+                            "type": "pong",
+                            "t": payload.get("t"),
+                            "ts": time.time() * 1000.0,
+                            "up_ms": None if _up_ms is None else round(_up_ms, 1),
+                        })
                         continue
                     elif msg_type == "set_output_quality":
                         try:
@@ -1367,7 +1512,10 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                             if app.state.runtime is not None:
                                 app.state.runtime.output_quality = output_quality
                             if h264_stream is not None:
-                                h264_stream.set_quality(output_quality)
+                                if flow.get("clamped"):
+                                    h264_stream.set_quality(min(int(output_quality), 20))
+                                else:
+                                    h264_stream.set_quality(output_quality)
                         except (TypeError, ValueError):
                             pass
                         continue
@@ -1394,6 +1542,19 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 }
                 frame_meta["t_server_recv_ms"] = time.time() * 1000.0
                 next_frame_meta = None
+
+                if not input_sniffed:
+                    input_sniffed = True
+                    _jpeg_magic = frame_bytes[:3] == b"\xff\xd8\xff"
+                    _annexb_magic = frame_bytes[:4] == b"\x00\x00\x00\x01" or frame_bytes[:3] == b"\x00\x00\x01"
+                    if _jpeg_magic and h264_ingest is not None:
+                        h264_ingest = None
+                        input_codec = "mjpeg"
+                        print("#####[STREAM] uplink sniffed JPEG -> input_codec=mjpeg", flush=True)
+                    elif _annexb_magic and h264_ingest is None and _up_allow:
+                        h264_ingest = _H264Ingest()
+                        input_codec = "h264"
+                        print("#####[STREAM] uplink sniffed H.264 -> input_codec=h264", flush=True)
 
                 uplink_frame: Image.Image | None = None
                 if h264_ingest is not None:
