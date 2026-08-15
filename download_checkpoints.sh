@@ -1,10 +1,30 @@
 #!/bin/bash
-# Download and organize model checkpoints
+# Download model checkpoints from HuggingFace (REQUIRED)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKPOINT_DIR="$SCRIPT_DIR/deploy/deps/checkpoints"
+
+echo "========================================================================"
+echo "Download Model Checkpoints"
+echo "========================================================================"
+echo ""
+
+# MUST have HF_TOKEN
+if [ -z "$HF_TOKEN" ]; then
+    echo "❌ ERROR: HF_TOKEN environment variable not set"
+    echo ""
+    echo "Set your HuggingFace token:"
+    echo "  export HF_TOKEN=hf_your_actual_token_here"
+    echo ""
+    echo "Then run:"
+    echo "  bash download_checkpoints.sh"
+    exit 1
+fi
+
+echo "✅ HF_TOKEN is set"
+echo ""
 
 # Find Python
 PYTHON=""
@@ -15,87 +35,116 @@ for py_cmd in python3 python python.exe; do
     fi
 done
 
-echo "========================================================================"
-echo "Checkpoint Setup"
-echo "========================================================================"
+if [ -z "$PYTHON" ]; then
+    echo "❌ ERROR: Python not found"
+    exit 1
+fi
+
+echo "Using Python: $PYTHON"
 echo ""
 
-# Create directory structure
-echo "[1/3] Creating checkpoint directories..."
+# Create directories
+echo "[1/2] Creating checkpoint directories..."
 mkdir -p "$CHECKPOINT_DIR/JoyAI-Video-Edit/dit/dit"
 mkdir -p "$CHECKPOINT_DIR/JoyAI-Video-Edit/vae"
 echo "  ✅ Directories created"
 echo ""
 
-# Check existing checkpoints
-echo "[2/3] Checking for existing checkpoints..."
+# Download checkpoints using Python + huggingface_hub
+echo "[2/2] Downloading checkpoints..."
 echo ""
 
-DIT_PATH="$CHECKPOINT_DIR/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0804.pth"
-if [ -f "$DIT_PATH" ]; then
-    SIZE=$(du -h "$DIT_PATH" | cut -f1)
-    echo "  ✅ DiT checkpoint found ($SIZE)"
-else
-    echo "  ⚠ DiT checkpoint NOT found"
-    echo "    Expected at: $DIT_PATH"
-    echo "    Size: ~28 GB"
+$PYTHON << 'PYTHON_DOWNLOAD'
+import os
+import sys
+from pathlib import Path
+
+hf_token = os.environ.get('HF_TOKEN')
+if not hf_token:
+    print("❌ ERROR: HF_TOKEN not set")
+    sys.exit(1)
+
+# Import huggingface_hub
+try:
+    from huggingface_hub import hf_hub_download, snapshot_download
+except ImportError:
+    print("❌ ERROR: huggingface_hub not installed")
+    print("Install with: pip install huggingface_hub")
+    sys.exit(1)
+
+dit_path = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/dit/dit")
+vae_path = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
+
+# Download DiT checkpoint
+print("Downloading DiT checkpoint (28-30 GB)...")
+print("  Source: 3a1b2c3/JoyAI-Video-Edit-dit")
+print("  Destination: " + str(dit_path))
+
+try:
+    dit_file = hf_hub_download(
+        repo_id="3a1b2c3/JoyAI-Video-Edit-dit",
+        filename="joyai_video_edit_dit_0804.pth",
+        local_dir=str(dit_path),
+        token=hf_token,
+        resume_download=True
+    )
+    print(f"  ✅ Downloaded: {dit_file}")
+
+except Exception as e:
+    print(f"  ❌ FAILED: {e}")
+    print("")
+    print("Check:")
+    print("  1. HF_TOKEN is valid and has access to repo")
+    print("  2. Repository 3a1b2c3/JoyAI-Video-Edit-dit exists")
+    print("  3. Internet connection is stable")
+    print("  4. You have enough disk space (28-30 GB)")
+    sys.exit(1)
+
+# Download VAE checkpoint
+print("")
+print("Downloading VAE checkpoint...")
+print("  Source: xvideo_xvae-released-ckpt")
+print("  Destination: " + str(vae_path))
+
+try:
+    vae_files = snapshot_download(
+        repo_id="xvideo_xvae-released-ckpt",
+        local_dir=str(vae_path),
+        token=hf_token,
+        resume_download=True
+    )
+    print(f"  ✅ Downloaded to: {vae_path}")
+
+except Exception as e:
+    print(f"  ❌ FAILED: {e}")
+    print("")
+    print("Check:")
+    print("  1. HF_TOKEN is valid")
+    print("  2. Repository xvideo_xvae-released-ckpt exists and you have access")
+    print("  3. Internet connection is stable")
+    print("  4. You have enough disk space")
+    sys.exit(1)
+
+print("")
+print("✅ All downloads complete!")
+
+PYTHON_DOWNLOAD
+
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ Download failed. See errors above."
+    exit 1
 fi
 
-VAE_PATH="$CHECKPOINT_DIR/JoyAI-Video-Edit/vae"
-if [ -f "$VAE_PATH/config.json" ] || [ -f "$VAE_PATH/diffusion_pytorch_model.bin" ]; then
-    echo "  ✅ VAE checkpoint found"
-else
-    echo "  ⚠ VAE checkpoint NOT found"
-    echo "    Expected at: $VAE_PATH"
-fi
-echo ""
-
-# Summary and instructions
-echo "[3/3] Setup Summary"
-echo "========================================================================"
-echo ""
-
-if [ -f "$DIT_PATH" ] && [ -f "$VAE_PATH/config.json" ]; then
-    echo "✅ All checkpoints ready!"
-    echo ""
-    echo "You can now run inference:"
-    echo "  bash run_inference.sh"
-else
-    echo "⚠ Missing checkpoints"
-    echo ""
-    echo "Place checkpoint files at:"
-    echo ""
-
-    if [ ! -f "$DIT_PATH" ]; then
-        echo "1. DiT Checkpoint (28-30 GB)"
-        echo "   File: joyai_video_edit_dit_0804.pth"
-        echo "   Path: $DIT_PATH"
-        echo ""
-    fi
-
-    if [ ! -f "$VAE_PATH/config.json" ]; then
-        echo "2. VAE Checkpoint"
-        echo "   Path: $VAE_PATH"
-        echo "   Files:"
-        echo "     - config.json"
-        echo "     - diffusion_pytorch_model.bin"
-        echo ""
-    fi
-
-    echo "After placing files, verify with:"
-    echo "  bash check_environment.sh"
-fi
-
 echo ""
 echo "========================================================================"
-echo "Directory Structure"
+echo "✅ Checkpoints Downloaded"
 echo "========================================================================"
 echo ""
-echo "deploy/deps/checkpoints/"
-echo "├── JoyAI-Video-Edit/"
-echo "│   ├── dit/dit/"
-echo "│   │   └── joyai_video_edit_dit_0804.pth (28-30 GB)"
-echo "│   └── vae/"
-echo "│       ├── config.json"
-echo "│       └── diffusion_pytorch_model.bin"
+echo "Checkpoint locations:"
+echo "  DiT:  $CHECKPOINT_DIR/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0804.pth"
+echo "  VAE:  $CHECKPOINT_DIR/JoyAI-Video-Edit/vae/"
+echo ""
+echo "Next: Run inference"
+echo "  bash run_inference.sh input.mp4 output.mp4"
 echo ""
