@@ -34,16 +34,33 @@ echo ""
 # Create venv
 echo "[2/4] Creating virtual environment..."
 if [ -d ".venv" ]; then
-    echo "  ℹ .venv already exists, skipping creation"
+    # Check if venv is valid
+    if [ -f ".venv/bin/activate" ] || [ -f ".venv/Scripts/activate" ]; then
+        echo "  ℹ .venv already exists and is valid"
+    else
+        echo "  ⚠ .venv exists but is corrupted (missing activate script)"
+        echo "  Removing and recreating..."
+        rm -rf .venv
+        $PYTHON -m venv .venv
+        echo "  ✅ Virtual environment created (fresh)"
+    fi
 else
     $PYTHON -m venv .venv
     echo "  ✅ Virtual environment created"
 fi
 echo ""
 
-# Activate venv
+# Activate venv (support both Linux/macOS and Windows)
 echo "[3/4] Activating virtual environment..."
-source .venv/bin/activate
+if [ -f ".venv/bin/activate" ]; then
+    source .venv/bin/activate
+elif [ -f ".venv/Scripts/activate" ]; then
+    source .venv/Scripts/activate
+else
+    echo "  ❌ Cannot find venv activation script"
+    echo "  Try: bash clean_venv.sh"
+    exit 1
+fi
 echo "  ✅ Virtual environment activated"
 echo ""
 
