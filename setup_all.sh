@@ -1,12 +1,10 @@
 #!/bin/bash
-# Complete setup: venv, dependencies, and checkpoint verification
+# Complete setup: install dependencies and verify environment
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-
-PYTHON_REQUIRED="3.11"  # Force Python 3.11 (NOT 3.12 on Windows)
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════════════╗"
@@ -14,7 +12,7 @@ echo "║                    DiT Inference Complete Setup                    ║
 echo "╚════════════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Find Python (use what's available)
+# Find Python
 echo "Finding Python installation..."
 PYTHON=""
 for py_cmd in python3 python python.exe; do
@@ -25,7 +23,7 @@ for py_cmd in python3 python python.exe; do
 done
 
 if [ -z "$PYTHON" ]; then
-    echo "❌ Python not found in PATH"
+    echo "❌ ERROR: Python not found in PATH"
     exit 1
 fi
 
@@ -51,9 +49,29 @@ fi
 
 echo ""
 
-# Step 1: Setup venv
-echo "Step 1: Setting up virtual environment..."
-bash setup_venv.sh
+# Step 1: Install dependencies
+echo "Step 1: Installing dependencies via pip..."
+echo "  Installing PyTorch with CUDA..."
+
+$PYTHON -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1 || true
+
+# Install PyTorch with CUDA support
+$PYTHON -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 2>&1 | grep -E "Successfully|Collecting|ERROR" | head -10
+
+echo "  Installing additional packages..."
+$PYTHON -m pip install -q \
+    transformers \
+    diffusers \
+    opencv-python \
+    imageio \
+    imageio-ffmpeg \
+    numpy \
+    tqdm \
+    loguru \
+    tensorrt \
+    huggingface_hub
+
+echo "  ✅ All dependencies installed"
 echo ""
 
 # Step 2: Check environment
@@ -72,19 +90,6 @@ echo "║                         Setup Complete!                           ║"
 echo "╚════════════════════════════════════════════════════════════════════╝"
 echo ""
 
-echo "Next: Run inference with one of the following:"
-echo ""
-echo "  1. Quick start (defaults):"
-echo "     bash run_inference.sh"
-echo ""
-echo "  2. Custom parameters:"
-echo "     bash run_inference_custom.sh input.mp4 output.mp4 4 256 256 8 42"
-echo ""
-echo "  3. Batch processing:"
-echo "     bash batch_inference.sh ./videos outputs 4 4"
-echo ""
-echo "Documentation:"
-echo "  - SHELL_SCRIPTS.md — Script usage guide"
-echo "  - RUN_INFERENCE.md — Quick reference"
-echo "  - QUANTIZATION_ATTEMPTS.md — Technical details"
+echo "Next: Run inference"
+echo "  bash run_inference.sh input.mp4 output.mp4"
 echo ""

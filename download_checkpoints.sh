@@ -77,13 +77,13 @@ vae_path = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
 
 # Download DiT checkpoint
 print("Downloading DiT checkpoint (28-30 GB)...")
-print("  Source: 3a1b2c3/JoyAI-Video-Edit-dit")
+print("  Source: jdopensource/JoyAI-Video-Edit (dit folder)")
 print("  Destination: " + str(dit_path))
 
 try:
     dit_file = hf_hub_download(
-        repo_id="3a1b2c3/JoyAI-Video-Edit-dit",
-        filename="joyai_video_edit_dit_0804.pth",
+        repo_id="jdopensource/JoyAI-Video-Edit",
+        filename="dit/joyai_video_edit_dit_0811.pth",
         local_dir=str(dit_path),
         token=hf_token,
         resume_download=True
@@ -95,9 +95,10 @@ except Exception as e:
     print("")
     print("Check:")
     print("  1. HF_TOKEN is valid and has access to repo")
-    print("  2. Repository 3a1b2c3/JoyAI-Video-Edit-dit exists")
-    print("  3. Internet connection is stable")
-    print("  4. You have enough disk space (28-30 GB)")
+    print("  2. Repository jdopensource/JoyAI-Video-Edit exists")
+    print("  3. File dit/joyai_video_edit_dit_0811.pth exists in repo")
+    print("  4. Internet connection is stable")
+    print("  5. You have enough disk space (28-30 GB)")
     sys.exit(1)
 
 # Download VAE checkpoint
