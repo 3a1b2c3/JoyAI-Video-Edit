@@ -25,8 +25,8 @@ HEIGHT="${4:-256}"
 WIDTH="${5:-256}"
 STEPS="${6:-1}"
 
-# Run inference with properly quoted args
-$PYTHON run_inference.py \
+# Run memory-efficient inference with properly quoted args
+$PYTHON run_inference_lowmem.py \
   --video "$VIDEO" \
   --out "$OUTPUT" \
   --frames "$FRAMES" \

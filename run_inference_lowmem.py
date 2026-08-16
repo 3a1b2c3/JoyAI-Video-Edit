@@ -18,40 +18,28 @@ DEPLOY_DIR = SCRIPT_DIR / "deploy"
 sys.path.insert(0, str(DEPLOY_DIR))
 
 from xvideo.utils import seed_everything
+from xvideo.models.models import load_dit
 from xvideo.models.vae import XVAEChunkCausal
 from xvideo.config import ExpConfig
 from xvideo.models.pipeline import PRECISION_TO_TYPE
 
 def load_dit_lowmem(cfg, device):
-    """Load DiT with memory-efficient streaming."""
-    print("Loading DiT (memory-efficient)...")
+    """Load DiT with memory-efficient float16."""
+    print("Loading DiT (float16, memory-efficient)...")
 
-    # Load model on CPU first
-    print("  [1] Loading checkpoint on CPU...")
-    checkpoint = torch.load(cfg.dit_ckpt, map_location='cpu')
-    print(f"  [2] Checkpoint size: {sum(p.numel() for p in checkpoint.values() if isinstance(p, torch.Tensor)) / 1e9:.1f}GB")
-
-    # Create model shell
-    from xvideo.models.dit.dit import Transformer3DModel
-    dit = Transformer3DModel(
-        in_channels=cfg.in_channels,
-        out_channels=cfg.in_channels,
-    )
-
-    # Load state dict on CPU to avoid double allocation
-    print("  [3] Loading state on CPU...")
-    dit.load_state_dict(checkpoint, strict=False)
-    print("  [4] Converting to float16...")
+    # Load using standard function
+    print("  [1] Loading from checkpoint...")
+    dit = load_dit(cfg, device='cpu')
+    print("  [2] Converting to float16...")
     dit = dit.half()
 
-    # Move to GPU gradually
-    print("  [5] Moving to GPU...")
+    # Move to GPU
+    print("  [3] Moving to GPU...")
     dit = dit.to(device)
     dit.eval()
     dit.requires_grad_(False)
 
     # Clear memory
-    del checkpoint
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -73,6 +61,12 @@ def main():
     print("=" * 70)
 
     device = torch.device("cuda")
+    print(f"Device: {device}")
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    print()
+
     seed_everything(args.seed)
 
     # Load video
