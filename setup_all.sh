@@ -56,9 +56,9 @@ $PYTHON -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1 || true
 
 # Install from requirements.txt with exact versions
 if [ -f "deploy/requirements.txt" ]; then
-    echo "  Installing from deploy/requirements.txt..."
-    $PYTHON -m pip install -q -r deploy/requirements.txt
-    echo "  ✅ All dependencies installed with exact versions"
+    echo "  Installing from deploy/requirements.txt (CUDA 12.8)..."
+    $PYTHON -m pip install -q -r deploy/requirements.txt --index-url https://download.pytorch.org/whl/cu128
+    echo "  ✅ All dependencies installed with exact versions (CUDA 12.8)"
 else
     echo "  ⚠ deploy/requirements.txt not found, installing defaults..."
     $PYTHON -m pip install -q \
@@ -77,8 +77,20 @@ else
 fi
 echo ""
 
-# Step 2: Check environment
+# Step 2: Check environment and CUDA
 echo "Step 2: Checking environment..."
+
+# Verify CUDA
+echo "  Checking PyTorch CUDA support..."
+$PYTHON << 'PYTHON_CHECK'
+import torch
+if torch.cuda.is_available():
+    print(f"  ✅ CUDA available: {torch.cuda.get_device_name(0)}")
+    print(f"     VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+else:
+    print("  ❌ WARNING: CUDA not available - GPU will not be used")
+PYTHON_CHECK
+
 bash check_environment.sh
 echo ""
 
