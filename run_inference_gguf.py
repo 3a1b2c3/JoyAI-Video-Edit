@@ -134,14 +134,14 @@ def main():
     # Encode frames
     print(f"\n[3/5] VAE encoding {len(frames)} frames...")
     with torch.no_grad():
-        frames_chw = frames_tensor.permute(0, 3, 1, 2)
+        frames_chw = frames_tensor.permute(0, 3, 1, 2)  # (B, C, H, W)
         vae_dtype = next(vae.parameters()).dtype
 
         latents_list = []
         for i in tqdm(range(len(frames_chw)), desc="Encoding"):
             try:
-                frame_i = frames_chw[i:i+1].to(dtype=vae_dtype)
-                frame_i = frame_i.unsqueeze(2)
+                frame_i = frames_chw[i:i+1].to(dtype=vae_dtype)  # (1, C, H, W)
+                frame_i = frame_i.unsqueeze(2)  # (1, C, 1, H, W) - add time dim
 
                 posterior = vae.encode(frame_i).latent_dist
                 z = posterior.sample() * getattr(vae.config, 'scaling_factor', 0.18215)

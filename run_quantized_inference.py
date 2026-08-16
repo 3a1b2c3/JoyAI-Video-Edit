@@ -77,23 +77,19 @@ def load_models(device, use_quantized=True, checkpoint_path=None):
             n_filtered = len(raw_state) - len(state_dict)
             print(f"  Filtered {n_filtered} scale metadata keys")
 
-            # Create empty model on CPU without calling load_dit
-            print(f"  Creating empty model architecture on CPU...")
-            from xvideo.models.dit.dit import Transformer3DModel
+            # Try loading normally, catch error about scale keys
+            print(f"  Creating model on CPU...")
+            try:
+                dit = load_dit(cfg, device="cpu")
+            except RuntimeError as e:
+                if "Unexpected key" in str(e) and "__scale" in str(e):
+                    # Expected: scale keys in checkpoint, create empty model
+                    print(f"  Standard load failed (scale keys), creating empty model...")
+                    cfg.dit_ckpt = None
+                    dit = load_dit(cfg, device="cpu")
+                else:
+                    raise
 
-            # Use config from ExpConfig
-            model_config = {
-                "height": cfg.latent_height,
-                "width": cfg.latent_width,
-                "in_channels": cfg.in_channels,
-                "out_channels": cfg.out_channels,
-                "sample_size": cfg.sample_size,
-                "patch_size": cfg.patch_size,
-                "time_patch_size": cfg.time_patch_size,
-                "num_layers": cfg.num_layers,
-                "attention_head_dim": cfg.attention_head_dim,
-            }
-            dit = Transformer3DModel(**model_config)
             dit = dit.to(device)
 
             print(f"  Loading filtered state dict...")

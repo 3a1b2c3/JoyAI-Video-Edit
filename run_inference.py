@@ -22,6 +22,16 @@ from xvideo.models.vae import XVAEChunkCausal
 from xvideo.config import ExpConfig
 from xvideo.models.pipeline import PRECISION_TO_TYPE
 
+def print_memory():
+    """Print current GPU/CPU memory usage."""
+    if torch.cuda.is_available():
+        gpu_mem = torch.cuda.memory_allocated() / 1e9
+        gpu_reserved = torch.cuda.memory_reserved() / 1e9
+        print(f"  GPU: {gpu_mem:.1f}GB allocated, {gpu_reserved:.1f}GB reserved / 48GB")
+    import psutil
+    ram = psutil.virtual_memory()
+    print(f"  RAM: {ram.used / 1e9:.1f}GB used / {ram.total / 1e9:.1f}GB")
+
 def main():
     parser = argparse.ArgumentParser(description="DiT inference (float32)")
     parser.add_argument("--video", default="assets/Recording 2026-08-12 205529.mp4")
@@ -36,6 +46,8 @@ def main():
     print("=" * 70)
     print("DiT Inference (Float32)")
     print("=" * 70)
+    print_memory()
+
     device = torch.device("cuda")
     seed_everything(args.seed)
 
