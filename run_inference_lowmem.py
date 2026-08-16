@@ -28,19 +28,18 @@ def load_dit_lowmem(cfg, device):
     """Load DiT with memory-efficient float16."""
     print("Loading DiT (float16, memory-efficient)...")
 
-    # Load using standard function
-    print("  [1] Loading from checkpoint...")
-    dit = load_dit(cfg, device='cpu')
+    # Set float16 precision in config
+    print("  [1] Loading from checkpoint directly to GPU...")
+    original_precision = cfg.dit_precision
+    cfg.dit_precision = "fp16"
 
-    # Move to GPU BEFORE converting to float16 (reduces peak CPU memory)
-    print("  [2] Moving to GPU...")
-    dit = dit.to(device)
-    gc.collect()
-    torch.cuda.empty_cache()
+    # Load checkpoint directly to GPU (not CPU) to avoid peak RAM spike
+    dit = load_dit(cfg, device=device)
+    cfg.dit_precision = original_precision
 
-    print("  [3] Converting to float16 on GPU...")
-    dit = dit.half()
-
+    # Ensure float16
+    print("  [2] Ensuring float16 on GPU...")
+    dit = dit.to(device, dtype=torch.float16)
     dit.eval()
     dit.requires_grad_(False)
 
