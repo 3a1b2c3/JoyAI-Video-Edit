@@ -22,8 +22,8 @@ VIDEO="${1:-assets/Recording 2026-08-12 205529.mp4}"
 OUTPUT="${2:-outputs/dit_output.mp4}"
 REF_IMAGE="${3:-assets/image.png}"
 FRAMES="${4:-1}"
-HEIGHT="${5:-128}"
-WIDTH="${6:-128}"
+HEIGHT="${5:-256}"
+WIDTH="${6:-256}"
 STEPS="${7:-1}"
 
 # Run memory-efficient inference with properly quoted args

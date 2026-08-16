@@ -123,6 +123,36 @@ def fused_qk_norm_rope_3d(
         q = q_norm.reshape(B, L, H, D)
         k = k_norm.reshape(B, L, H, D)
 
+        cos, sin = freqs_cis
+        cos = cos.to(q.device)
+        sin = sin.to(q.device)
+
+        while cos.dim() > 2:
+            if cos.shape[0] != 1:
+                raise RuntimeError(f"freqs_cis cos has non-singleton leading dim: {cos.shape}")
+            cos = cos.squeeze(0)
+            sin = sin.squeeze(0)
+
+        D_rope = cos.shape[-1]
+        D_x = D
+
+        if D_rope == D_x:
+            cos = cos[..., ::2].contiguous()
+            sin = sin[..., ::2].contiguous()
+
+        cos_view = cos.view(1, L, 1, -1).expand(B, L, H, -1)
+        sin_view = sin.view(1, L, 1, -1).expand(B, L, H, -1)
+
+        q1, q2 = q[..., :D//2], q[..., D//2:]
+        k1, k2 = k[..., :D//2], k[..., D//2:]
+
+        q1_rot = q1 * cos_view - q2 * sin_view
+        q2_rot = q1 * sin_view + q2 * cos_view
+        k1_rot = k1 * cos_view - k2 * sin_view
+        k2_rot = k1 * sin_view + k2 * cos_view
+
+        q = torch.cat([q1_rot, q2_rot], dim=-1)
+        k = torch.cat([k1_rot, k2_rot], dim=-1)
         return q, k
 
 
