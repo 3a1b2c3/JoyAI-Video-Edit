@@ -5,7 +5,7 @@ import urllib.request
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
 
 app = FastAPI()
