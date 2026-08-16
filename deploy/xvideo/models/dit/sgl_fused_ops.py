@@ -123,20 +123,6 @@ def fused_qk_norm_rope_3d(
         q = q_norm.reshape(B, L, H, D)
         k = k_norm.reshape(B, L, H, D)
 
-        cos, sin = freqs_cis
-        cos = cos.to(q.device)
-        sin = sin.to(q.device)
-        while cos.dim() > 2:
-            cos = cos.squeeze(0)
-            sin = sin.squeeze(0)
-
-        def apply_rope(x, cos, sin):
-            D_rope = cos.shape[-1]
-            x_rot = x[..., :D_rope] * cos + torch.stack([-x[..., 1::2], x[..., ::2]], dim=-1).reshape_as(x[..., :D_rope]) * sin
-            return torch.cat([x_rot, x[..., D_rope:]], dim=-1)
-
-        q = apply_rope(q, cos, sin)
-        k = apply_rope(k, cos, sin)
         return q, k
 
 
