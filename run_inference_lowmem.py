@@ -37,9 +37,14 @@ def load_dit_lowmem(cfg, device):
     dit = load_dit(cfg, device=device)
     cfg.dit_precision = original_precision
 
-    # Ensure float16
+    # Ensure float16 on all parameters and buffers
     print("  [2] Ensuring float16 on GPU...")
     dit = dit.to(device, dtype=torch.float16)
+
+    # Force all buffers to same dtype
+    for buffer in dit.buffers():
+        buffer.data = buffer.data.to(dtype=torch.float16)
+
     dit.eval()
     dit.requires_grad_(False)
 
