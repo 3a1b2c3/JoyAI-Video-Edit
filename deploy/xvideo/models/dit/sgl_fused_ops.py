@@ -39,35 +39,27 @@ def fused_layernorm_modulate(
     bias: Optional[torch.Tensor] = None,
     eps: float = 1e-6,
 ) -> torch.Tensor:
-    if _try_import():
-        B, L, D = x.shape
-        x_2d = x.reshape(-1, D)
+    if not _try_import():
+        raise RuntimeError(
+            "joyomni_ops not available. This model requires fused operations.\n"
+            "Install joyomni_ops or run on a system with it pre-installed.\n"
+            "Alternatively, use horde machine with proper dependencies."
+        )
 
-        if scale.dim() == 2:
-            scale = scale.unsqueeze(1)
-            shift = shift.unsqueeze(1)
-        if scale.shape[1] == 1 and L != 1:
-            scale = scale.expand(B, L, D)
-            shift = shift.expand(B, L, D)
-        scale_2d = scale.reshape(-1, D).contiguous()
-        shift_2d = shift.reshape(-1, D).contiguous()
+    B, L, D = x.shape
+    x_2d = x.reshape(-1, D)
 
-        out = _FUSED_NORM_SCALE_SHIFT(x_2d, weight, bias, scale_2d, shift_2d, "layer", eps)
-        return out.reshape(B, L, D)
-    else:
-        B, L, D = x.shape
-        x_flat = x.reshape(-1, D)
-        x_norm = torch.nn.functional.layer_norm(x_flat, (D,), weight, bias, eps)
-        x_norm = x_norm.reshape(B, L, D)
+    if scale.dim() == 2:
+        scale = scale.unsqueeze(1)
+        shift = shift.unsqueeze(1)
+    if scale.shape[1] == 1 and L != 1:
+        scale = scale.expand(B, L, D)
+        shift = shift.expand(B, L, D)
+    scale_2d = scale.reshape(-1, D).contiguous()
+    shift_2d = shift.reshape(-1, D).contiguous()
 
-        if scale.dim() == 2:
-            scale = scale.unsqueeze(1)
-            shift = shift.unsqueeze(1)
-        if scale.shape[1] == 1 and L != 1:
-            scale = scale.expand(B, L, D)
-            shift = shift.expand(B, L, D)
-
-        return x_norm * scale + shift
+    out = _FUSED_NORM_SCALE_SHIFT(x_2d, weight, bias, scale_2d, shift_2d, "layer", eps)
+    return out.reshape(B, L, D)
 
 
 def fused_qk_norm_rope_3d(
@@ -112,48 +104,6 @@ def fused_qk_norm_rope_3d(
 
         _FUSED_QK_NORM_ROPE_3D(q_r, k_r, L, H, eps, qw, kw, cos_bf16, sin_bf16)
         return q, k
-    else:
-        B, L, H, D = q.shape
-        q_flat = q.reshape(-1, D)
-        k_flat = k.reshape(-1, D)
-
-        q_norm = torch.nn.functional.layer_norm(q_flat, (D,), q_norm_weight, None, eps)
-        k_norm = torch.nn.functional.layer_norm(k_flat, (D,), k_norm_weight, None, eps)
-
-        q = q_norm.reshape(B, L, H, D)
-        k = k_norm.reshape(B, L, H, D)
-
-        cos, sin = freqs_cis
-        cos = cos.to(q.device)
-        sin = sin.to(q.device)
-
-        while cos.dim() > 2:
-            if cos.shape[0] != 1:
-                raise RuntimeError(f"freqs_cis cos has non-singleton leading dim: {cos.shape}")
-            cos = cos.squeeze(0)
-            sin = sin.squeeze(0)
-
-        D_rope = cos.shape[-1]
-        D_x = D
-
-        if D_rope == D_x:
-            cos = cos[..., ::2].contiguous()
-            sin = sin[..., ::2].contiguous()
-
-        cos_view = cos.view(1, L, 1, -1).expand(B, L, H, -1)
-        sin_view = sin.view(1, L, 1, -1).expand(B, L, H, -1)
-
-        q1, q2 = q[..., :D//2], q[..., D//2:]
-        k1, k2 = k[..., :D//2], k[..., D//2:]
-
-        q1_rot = q1 * cos_view - q2 * sin_view
-        q2_rot = q1 * sin_view + q2 * cos_view
-        k1_rot = k1 * cos_view - k2 * sin_view
-        k2_rot = k1 * sin_view + k2 * cos_view
-
-        q = torch.cat([q1_rot, q2_rot], dim=-1)
-        k = torch.cat([k1_rot, k2_rot], dim=-1)
-        return q, k
 
 
 def rmsnorm_qk_bf16(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
@@ -165,16 +115,6 @@ def rmsnorm_qk_bf16(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-6) ->
         x_flat = x.reshape(-1, D).contiguous()
         w = weight.to(dtype=torch.bfloat16)
         out = _RMSNORM(x_flat, w, eps)
-        return out.reshape(orig_shape)
-    else:
-        orig_shape = x.shape
-        D = orig_shape[-1]
-        x_flat = x.reshape(-1, D)
-
-        rms = torch.sqrt((x_flat ** 2).mean(dim=-1, keepdim=True) + eps)
-        x_norm = x_flat / rms
-        w = weight.to(dtype=torch.bfloat16)
-        out = x_norm * w
         return out.reshape(orig_shape)
 
 

@@ -36,6 +36,7 @@ def main():
     parser = argparse.ArgumentParser(description="DiT inference (float32)")
     parser.add_argument("--video", default="assets/Recording 2026-08-12 205529.mp4")
     parser.add_argument("--out", default="outputs/dit_output.mp4")
+    parser.add_argument("--ref-image", default="assets/image.png", help="Style/reference image (loaded but not used in basic inference)")
     parser.add_argument("--frames", type=int, default=2)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)

@@ -49,6 +49,15 @@ fi
 
 echo ""
 
+# Setup CUDA environment
+echo "Setting up CUDA environment..."
+export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda-12.4}
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
+echo "  CUDA_HOME: $CUDA_HOME"
+
+echo ""
+
 # Step 1: Install dependencies with exact versions
 echo "Step 1: Installing dependencies with exact versions..."
 
@@ -99,8 +108,23 @@ echo "Step 3: Verifying checkpoints..."
 bash download_checkpoints.sh
 echo ""
 
-# Step 4: Save installed versions
-echo "Step 4: Saving installed versions..."
+# Step 4: Build joyomni_ops (CUDA extension)
+echo "Step 4: Building joyomni_ops CUDA extension..."
+if [ -d "deploy/joyomni_ops" ]; then
+    cd deploy/joyomni_ops
+    echo "  Building joyomni_ops..."
+    $PYTHON setup.py build_ext --inplace
+    echo "  Installing joyomni_ops..."
+    $PYTHON -m pip install -e . -q
+    cd ../..
+    echo "  ✅ joyomni_ops built successfully"
+else
+    echo "  ⚠ deploy/joyomni_ops not found, skipping"
+fi
+echo ""
+
+# Step 6: Save installed versions
+echo "Step 6: Saving installed versions..."
 $PYTHON -m pip freeze > installed_versions.txt
 echo "  ✅ Saved to: installed_versions.txt"
 echo ""
