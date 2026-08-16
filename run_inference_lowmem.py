@@ -94,8 +94,38 @@ def main():
         ok, bgr = cap.read()
         if not ok:
             break
-        bgr = cv2.resize(bgr, (args.width, args.height))
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+        # Preserve aspect ratio: resize to fit target size, then pad
+        orig_h, orig_w = bgr.shape[:2]
+        aspect_ratio = orig_w / orig_h
+
+        # Calculate new size maintaining aspect ratio
+        if aspect_ratio > args.width / args.height:
+            # Wider than target - fit to width
+            new_w = args.width
+            new_h = int(args.width / aspect_ratio)
+        else:
+            # Taller than target - fit to height
+            new_h = args.height
+            new_w = int(args.height * aspect_ratio)
+
+        # Resize
+        bgr_resized = cv2.resize(bgr, (new_w, new_h))
+
+        # Pad to target size (center the image)
+        pad_top = (args.height - new_h) // 2
+        pad_bottom = args.height - new_h - pad_top
+        pad_left = (args.width - new_w) // 2
+        pad_right = args.width - new_w - pad_left
+
+        bgr_padded = cv2.copyMakeBorder(
+            bgr_resized,
+            pad_top, pad_bottom, pad_left, pad_right,
+            cv2.BORDER_CONSTANT,
+            value=(0, 0, 0)
+        )
+
+        rgb = cv2.cvtColor(bgr_padded, cv2.COLOR_BGR2RGB)
         frames.append(torch.from_numpy(rgb).float() / 255.0)
     cap.release()
 
