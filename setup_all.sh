@@ -49,29 +49,32 @@ fi
 
 echo ""
 
-# Step 1: Install dependencies
-echo "Step 1: Installing dependencies via pip..."
-echo "  Installing PyTorch with CUDA..."
+# Step 1: Install dependencies with exact versions
+echo "Step 1: Installing dependencies with exact versions..."
 
 $PYTHON -m pip install --upgrade pip setuptools wheel > /dev/null 2>&1 || true
 
-# Install PyTorch with CUDA support
-$PYTHON -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 2>&1 | grep -E "Successfully|Collecting|ERROR" | head -10
-
-echo "  Installing additional packages..."
-$PYTHON -m pip install -q \
-    transformers \
-    diffusers \
-    opencv-python \
-    imageio \
-    imageio-ffmpeg \
-    numpy \
-    tqdm \
-    loguru \
-    tensorrt \
-    huggingface_hub
-
-echo "  ✅ All dependencies installed"
+# Install from requirements.txt with exact versions
+if [ -f "deploy/requirements.txt" ]; then
+    echo "  Installing from deploy/requirements.txt..."
+    $PYTHON -m pip install -q -r deploy/requirements.txt
+    echo "  ✅ All dependencies installed with exact versions"
+else
+    echo "  ⚠ deploy/requirements.txt not found, installing defaults..."
+    $PYTHON -m pip install -q \
+        torch==2.9.1 \
+        torchvision==0.24.1 \
+        transformers==4.57.1 \
+        diffusers==0.36.0 \
+        opencv-python \
+        imageio \
+        imageio-ffmpeg \
+        numpy \
+        tqdm \
+        loguru \
+        huggingface_hub
+    echo "  ✅ Dependencies installed"
+fi
 echo ""
 
 # Step 2: Check environment
