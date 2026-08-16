@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run DiT inference with float32 checkpoint."""
+"""Run inference with GGUF (INT8 quantized) DiT checkpoint."""
 
 import sys
 import argparse
@@ -17,15 +17,56 @@ DEPLOY_DIR = SCRIPT_DIR / "deploy"
 sys.path.insert(0, str(DEPLOY_DIR))
 
 from xvideo.utils import seed_everything
-from xvideo.models.models import load_dit
 from xvideo.models.vae import XVAEChunkCausal
 from xvideo.config import ExpConfig
 from xvideo.models.pipeline import PRECISION_TO_TYPE
 
+def dequantize_int8(q_data, scale, zero_point):
+    """Dequantize int8 back to float."""
+    return (q_data.float() - zero_point) * scale
+
+def load_gguf_dit(gguf_path, device):
+    """Load quantized DiT from GGUF checkpoint."""
+    print(f"Loading GGUF checkpoint: {gguf_path}")
+    checkpoint = torch.load(gguf_path, map_location='cpu')
+
+    if checkpoint['format'] != 'gguf_int8':
+        raise ValueError(f"Expected gguf_int8, got {checkpoint['format']}")
+
+    # Load model architecture
+    from xvideo.models.dit import Transformer3DModel
+    config = checkpoint['config']
+
+    # Create model
+    dit = Transformer3DModel(
+        in_channels=config['in_channels'],
+        out_channels=config['in_channels'],
+    )
+
+    # Dequantize and load state
+    print("Dequantizing parameters...")
+    state_dict = {}
+    for name, q_info in tqdm(checkpoint['quantized_state'].items(), desc="Dequantize"):
+        q_data = q_info['data'].to(device)
+        scale = q_info['scale']
+        zero_point = q_info['zero_point']
+
+        # Dequantize
+        dequantized = dequantize_int8(q_data, scale, zero_point)
+        state_dict[name] = dequantized.to(dtype=torch.bfloat16)
+
+    dit.load_state_dict(state_dict)
+    dit = dit.to(device)
+    dit.eval()
+    dit.requires_grad_(False)
+
+    print(f"✓ GGUF model loaded ({config['total_params'] / 1e9:.2f}B params)")
+    return dit
+
 def main():
-    parser = argparse.ArgumentParser(description="DiT inference (float32)")
+    parser = argparse.ArgumentParser(description="DiT inference (GGUF INT8)")
     parser.add_argument("--video", default="assets/Recording 2026-08-12 205529.mp4")
-    parser.add_argument("--out", default="outputs/dit_output.mp4")
+    parser.add_argument("--out", default="outputs/dit_gguf.mp4")
     parser.add_argument("--frames", type=int, default=2)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
@@ -34,8 +75,9 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print("DiT Inference (Float32)")
+    print("DiT Inference (GGUF INT8)")
     print("=" * 70)
+
     device = torch.device("cuda")
     seed_everything(args.seed)
 
@@ -63,24 +105,22 @@ def main():
     print(f"✓ Loaded {len(frames)} frames @ {fps:.1f} fps")
 
     # Load models
-    print(f"\n[2/5] Loading DiT + VAE...")
+    print(f"\n[2/5] Loading DiT (GGUF) + VAE...")
     try:
+        gguf_path = SCRIPT_DIR / "deploy" / "models" / "dit_int8.gguf.pth"
+        if not gguf_path.exists():
+            print(f"ERROR: GGUF checkpoint not found: {gguf_path}")
+            print("Run: python convert_to_gguf.py")
+            return 1
+
+        dit = load_gguf_dit(str(gguf_path), device)
+
         cfg = ExpConfig()
-        cfg.training_mode = False
-        cfg.dit_ckpt = str(DEPLOY_DIR / "deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth")
-
-        dit = load_dit(cfg, device=device)
-        dit = dit.to(device)  # Ensure all params on GPU
-        dit.eval()
-        dit.requires_grad_(False)
-        print(f"✓ DiT loaded (float32)")
-
-        vae_ckpt = DEPLOY_DIR / "deps/checkpoints/JoyAI-Video-Edit/vae"
         vae = XVAEChunkCausal.from_pretrained(
-            str(vae_ckpt),
+            str(DEPLOY_DIR / "deps/checkpoints/JoyAI-Video-Edit/vae"),
             torch_dtype=PRECISION_TO_TYPE[cfg.vae_precision],
         )
-        vae = vae.to(device)  # Ensure on GPU
+        vae = vae.to(device)
         vae.eval()
         vae.requires_grad_(False)
         print(f"✓ VAE loaded")
@@ -96,16 +136,19 @@ def main():
     with torch.no_grad():
         frames_chw = frames_tensor.permute(0, 3, 1, 2)
         vae_dtype = next(vae.parameters()).dtype
-        frames_chw = frames_chw.to(dtype=vae_dtype)
 
         latents_list = []
         for i in tqdm(range(len(frames_chw)), desc="Encoding"):
             try:
-                frame_i = frames_chw[i:i+1]
+                frame_i = frames_chw[i:i+1].to(dtype=vae_dtype)
                 frame_i = frame_i.unsqueeze(2)
+
                 posterior = vae.encode(frame_i).latent_dist
                 z = posterior.sample() * getattr(vae.config, 'scaling_factor', 0.18215)
                 latents_list.append(z)
+
+                torch.cuda.empty_cache()
+
             except Exception as e:
                 print(f"\n  ✗ Frame {i}: {e}")
                 continue
@@ -117,7 +160,7 @@ def main():
         latents = torch.cat(latents_list, dim=0)
         print(f"✓ Encoded to latents: {latents.shape}")
 
-    # Diffusion with DiT model
+    # Diffusion
     print(f"\n[4/5] Running diffusion ({args.steps} steps)...")
     dit_dtype = next(dit.parameters()).dtype
     with torch.no_grad():
@@ -134,14 +177,17 @@ def main():
                 # Forward pass
                 model_output = dit(latents_typed, t_tensor, context)
 
+                # Handle tuple output
+                if isinstance(model_output, (tuple, list)):
+                    model_output = model_output[0]
+
                 # Update latents
                 sigma = np.sqrt(t / (1 - t)) if t > 0 else 0
                 dt = -sigma * 0.1
                 latents = latents + model_output * dt
 
-        except torch.cuda.OutOfMemoryError as e:
-            print(f"\n❌ GPU OOM: {e}")
-            return 1
+                torch.cuda.empty_cache()
+
         except Exception as e:
             print(f"\n❌ Error: {e}")
             import traceback
@@ -149,7 +195,7 @@ def main():
             return 1
 
         elapsed = time.time() - start
-        print(f"Inference time: {elapsed:.2f}s ({len(frames)/elapsed:.1f} fps)")
+        print(f"Inference time: {elapsed:.2f}s")
 
     # Decode
     print(f"\n[5/5] Decoding...")
@@ -163,6 +209,9 @@ def main():
                 z = latents_decoded[i:i+1]
                 frame = vae.decode(z).sample
                 frames_decoded.append(frame)
+
+                torch.cuda.empty_cache()
+
             except Exception as e:
                 print(f"Warning: Frame {i} decode failed ({e})")
                 continue
@@ -187,13 +236,12 @@ def main():
         print(f"\n✓ Video saved: {args.out}")
         print(f"  Size: {out_size:.1f} MB")
         print(f"  Frames: {len(output_frames)}")
-        print(f"  Duration: {len(output_frames)/fps:.1f}s @ {fps:.1f} fps")
     except Exception as e:
         print(f"ERROR: Failed to save video: {e}")
         return 1
 
     print("\n" + "=" * 70)
-    print("✅ INFERENCE COMPLETE")
+    print("✅ GGUF INFERENCE COMPLETE")
     print("=" * 70)
 
     return 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run DiT inference with float32 checkpoint."""
+"""Memory-efficient DiT inference with CPU offloading."""
 
 import sys
 import argparse
@@ -23,9 +23,9 @@ from xvideo.config import ExpConfig
 from xvideo.models.pipeline import PRECISION_TO_TYPE
 
 def main():
-    parser = argparse.ArgumentParser(description="DiT inference (float32)")
+    parser = argparse.ArgumentParser(description="DiT inference (low memory)")
     parser.add_argument("--video", default="assets/Recording 2026-08-12 205529.mp4")
-    parser.add_argument("--out", default="outputs/dit_output.mp4")
+    parser.add_argument("--out", default="outputs/dit_output_lowmem.mp4")
     parser.add_argument("--frames", type=int, default=2)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
@@ -34,8 +34,9 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print("DiT Inference (Float32)")
+    print("DiT Inference (Low Memory Mode)")
     print("=" * 70)
+
     device = torch.device("cuda")
     seed_everything(args.seed)
 
@@ -62,28 +63,28 @@ def main():
     frames_tensor = torch.stack(frames).to(device)
     print(f"✓ Loaded {len(frames)} frames @ {fps:.1f} fps")
 
-    # Load models
-    print(f"\n[2/5] Loading DiT + VAE...")
+    # Load models with memory optimization
+    print(f"\n[2/5] Loading DiT + VAE (memory optimized)...")
     try:
         cfg = ExpConfig()
         cfg.training_mode = False
         cfg.dit_ckpt = str(DEPLOY_DIR / "deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth")
 
         dit = load_dit(cfg, device=device)
-        dit = dit.to(device)  # Ensure all params on GPU
         dit.eval()
         dit.requires_grad_(False)
-        print(f"✓ DiT loaded (float32)")
+
+        print(f"✓ DiT loaded")
 
         vae_ckpt = DEPLOY_DIR / "deps/checkpoints/JoyAI-Video-Edit/vae"
         vae = XVAEChunkCausal.from_pretrained(
             str(vae_ckpt),
             torch_dtype=PRECISION_TO_TYPE[cfg.vae_precision],
+            device="cpu",  # Keep VAE on CPU to save GPU memory
         )
-        vae = vae.to(device)  # Ensure on GPU
         vae.eval()
         vae.requires_grad_(False)
-        print(f"✓ VAE loaded")
+        print(f"✓ VAE loaded (CPU)")
 
     except Exception as e:
         print(f"ERROR: Failed to load models: {e}")
@@ -91,21 +92,27 @@ def main():
         traceback.print_exc()
         return 1
 
-    # Encode frames
+    # Encode frames (move VAE to GPU per-batch)
     print(f"\n[3/5] VAE encoding {len(frames)} frames...")
     with torch.no_grad():
         frames_chw = frames_tensor.permute(0, 3, 1, 2)
         vae_dtype = next(vae.parameters()).dtype
-        frames_chw = frames_chw.to(dtype=vae_dtype)
 
         latents_list = []
         for i in tqdm(range(len(frames_chw)), desc="Encoding"):
             try:
-                frame_i = frames_chw[i:i+1]
+                frame_i = frames_chw[i:i+1].to(dtype=vae_dtype)
                 frame_i = frame_i.unsqueeze(2)
-                posterior = vae.encode(frame_i).latent_dist
+
+                # Move VAE to GPU, encode, move back to CPU
+                vae_gpu = vae.to(device)
+                posterior = vae_gpu.encode(frame_i.to(device)).latent_dist
                 z = posterior.sample() * getattr(vae.config, 'scaling_factor', 0.18215)
-                latents_list.append(z)
+                latents_list.append(z.to("cpu"))
+                vae_gpu.to("cpu")
+
+                torch.cuda.empty_cache()
+
             except Exception as e:
                 print(f"\n  ✗ Frame {i}: {e}")
                 continue
@@ -114,10 +121,10 @@ def main():
             print("ERROR: All frames failed to encode")
             return 1
 
-        latents = torch.cat(latents_list, dim=0)
+        latents = torch.cat(latents_list, dim=0).to(device)
         print(f"✓ Encoded to latents: {latents.shape}")
 
-    # Diffusion with DiT model
+    # Diffusion with memory optimization
     print(f"\n[4/5] Running diffusion ({args.steps} steps)...")
     dit_dtype = next(dit.parameters()).dtype
     with torch.no_grad():
@@ -139,8 +146,11 @@ def main():
                 dt = -sigma * 0.1
                 latents = latents + model_output * dt
 
+                torch.cuda.empty_cache()
+
         except torch.cuda.OutOfMemoryError as e:
             print(f"\n❌ GPU OOM: {e}")
+            print("Try reducing --frames or --height/--width")
             return 1
         except Exception as e:
             print(f"\n❌ Error: {e}")
@@ -151,18 +161,22 @@ def main():
         elapsed = time.time() - start
         print(f"Inference time: {elapsed:.2f}s ({len(frames)/elapsed:.1f} fps)")
 
-    # Decode
+    # Decode (move VAE to GPU)
     print(f"\n[5/5] Decoding...")
     with torch.no_grad():
         scale = getattr(vae.config, 'scaling_factor', 0.18215)
         latents_decoded = latents / scale
 
         frames_decoded = []
+        vae_gpu = vae.to(device)
         for i in tqdm(range(len(latents_decoded)), desc="Decoding"):
             try:
                 z = latents_decoded[i:i+1]
-                frame = vae.decode(z).sample
-                frames_decoded.append(frame)
+                frame = vae_gpu.decode(z).sample
+                frames_decoded.append(frame.to("cpu"))
+
+                torch.cuda.empty_cache()
+
             except Exception as e:
                 print(f"Warning: Frame {i} decode failed ({e})")
                 continue
@@ -173,6 +187,9 @@ def main():
 
         decoded_frames = torch.cat(frames_decoded, dim=0)
         print(f"✓ Decoded {len(decoded_frames)} frames")
+
+    vae_gpu.to("cpu")
+    torch.cuda.empty_cache()
 
     # Save
     if decoded_frames.ndim == 5:
@@ -193,7 +210,7 @@ def main():
         return 1
 
     print("\n" + "=" * 70)
-    print("✅ INFERENCE COMPLETE")
+    print("✅ LOW MEMORY INFERENCE COMPLETE")
     print("=" * 70)
 
     return 0

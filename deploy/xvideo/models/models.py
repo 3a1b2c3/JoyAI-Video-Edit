@@ -1,5 +1,4 @@
 import torch
-from transformers import Qwen2Tokenizer, Qwen2_5_VLForConditionalGeneration
 from loguru import logger
 
 from xvideo.models.dit import Transformer3DModel
@@ -13,6 +12,7 @@ def load_text_encoder(
     device: torch.device = torch.device("cpu"),
     torch_dtype: torch.dtype = torch.bfloat16,
 ):
+    from transformers import Qwen2Tokenizer, Qwen2_5_VLForConditionalGeneration
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         text_encoder_ckpt,
         dtype=torch_dtype,

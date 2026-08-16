@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run DiT inference with float32 checkpoint."""
+"""Real memory-efficient DiT inference - process sequentially, clear cache."""
 
 import sys
 import argparse
@@ -23,19 +23,22 @@ from xvideo.config import ExpConfig
 from xvideo.models.pipeline import PRECISION_TO_TYPE
 
 def main():
-    parser = argparse.ArgumentParser(description="DiT inference (float32)")
+    parser = argparse.ArgumentParser(description="DiT inference (memory efficient)")
     parser.add_argument("--video", default="assets/Recording 2026-08-12 205529.mp4")
     parser.add_argument("--out", default="outputs/dit_output.mp4")
-    parser.add_argument("--frames", type=int, default=2)
-    parser.add_argument("--height", type=int, default=256)
-    parser.add_argument("--width", type=int, default=256)
+    parser.add_argument("--frames", type=int, default=1)
+    parser.add_argument("--height", type=int, default=192)
+    parser.add_argument("--width", type=int, default=192)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=1)
     args = parser.parse_args()
 
     print("=" * 70)
-    print("DiT Inference (Float32)")
+    print("DiT Inference (Memory Efficient)")
     print("=" * 70)
+    print(f"Resolution: {args.height}x{args.width}")
+    print(f"Frames: {args.frames}, Steps: {args.steps}")
+
     device = torch.device("cuda")
     seed_everything(args.seed)
 
@@ -61,6 +64,7 @@ def main():
 
     frames_tensor = torch.stack(frames).to(device)
     print(f"✓ Loaded {len(frames)} frames @ {fps:.1f} fps")
+    torch.cuda.empty_cache()
 
     # Load models
     print(f"\n[2/5] Loading DiT + VAE...")
@@ -70,20 +74,21 @@ def main():
         cfg.dit_ckpt = str(DEPLOY_DIR / "deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth")
 
         dit = load_dit(cfg, device=device)
-        dit = dit.to(device)  # Ensure all params on GPU
+        dit = dit.to(device)
         dit.eval()
         dit.requires_grad_(False)
-        print(f"✓ DiT loaded (float32)")
+        print(f"✓ DiT loaded")
 
         vae_ckpt = DEPLOY_DIR / "deps/checkpoints/JoyAI-Video-Edit/vae"
         vae = XVAEChunkCausal.from_pretrained(
             str(vae_ckpt),
             torch_dtype=PRECISION_TO_TYPE[cfg.vae_precision],
         )
-        vae = vae.to(device)  # Ensure on GPU
+        vae = vae.to(device)
         vae.eval()
         vae.requires_grad_(False)
         print(f"✓ VAE loaded")
+        torch.cuda.empty_cache()
 
     except Exception as e:
         print(f"ERROR: Failed to load models: {e}")
@@ -91,21 +96,24 @@ def main():
         traceback.print_exc()
         return 1
 
-    # Encode frames
+    # Encode frames (one at a time to save memory)
     print(f"\n[3/5] VAE encoding {len(frames)} frames...")
     with torch.no_grad():
         frames_chw = frames_tensor.permute(0, 3, 1, 2)
         vae_dtype = next(vae.parameters()).dtype
-        frames_chw = frames_chw.to(dtype=vae_dtype)
 
         latents_list = []
         for i in tqdm(range(len(frames_chw)), desc="Encoding"):
             try:
-                frame_i = frames_chw[i:i+1]
+                frame_i = frames_chw[i:i+1].to(dtype=vae_dtype)
                 frame_i = frame_i.unsqueeze(2)
+
                 posterior = vae.encode(frame_i).latent_dist
                 z = posterior.sample() * getattr(vae.config, 'scaling_factor', 0.18215)
                 latents_list.append(z)
+
+                torch.cuda.empty_cache()
+
             except Exception as e:
                 print(f"\n  ✗ Frame {i}: {e}")
                 continue
@@ -116,8 +124,9 @@ def main():
 
         latents = torch.cat(latents_list, dim=0)
         print(f"✓ Encoded to latents: {latents.shape}")
+        torch.cuda.empty_cache()
 
-    # Diffusion with DiT model
+    # Diffusion
     print(f"\n[4/5] Running diffusion ({args.steps} steps)...")
     dit_dtype = next(dit.parameters()).dtype
     with torch.no_grad():
@@ -134,13 +143,25 @@ def main():
                 # Forward pass
                 model_output = dit(latents_typed, t_tensor, context)
 
+                # Handle case where model returns tuple
+                if isinstance(model_output, (tuple, list)):
+                    model_output = model_output[0]
+
+                # Ensure tensor
+                if not isinstance(model_output, torch.Tensor):
+                    print(f"ERROR: Unexpected model output type: {type(model_output)}")
+                    return 1
+
                 # Update latents
                 sigma = np.sqrt(t / (1 - t)) if t > 0 else 0
                 dt = -sigma * 0.1
                 latents = latents + model_output * dt
 
+                torch.cuda.empty_cache()
+
         except torch.cuda.OutOfMemoryError as e:
             print(f"\n❌ GPU OOM: {e}")
+            print("Try reducing --frames, --height, or --width")
             return 1
         except Exception as e:
             print(f"\n❌ Error: {e}")
@@ -149,7 +170,7 @@ def main():
             return 1
 
         elapsed = time.time() - start
-        print(f"Inference time: {elapsed:.2f}s ({len(frames)/elapsed:.1f} fps)")
+        print(f"Inference time: {elapsed:.2f}s")
 
     # Decode
     print(f"\n[5/5] Decoding...")
@@ -163,6 +184,9 @@ def main():
                 z = latents_decoded[i:i+1]
                 frame = vae.decode(z).sample
                 frames_decoded.append(frame)
+
+                torch.cuda.empty_cache()
+
             except Exception as e:
                 print(f"Warning: Frame {i} decode failed ({e})")
                 continue
@@ -173,6 +197,7 @@ def main():
 
         decoded_frames = torch.cat(frames_decoded, dim=0)
         print(f"✓ Decoded {len(decoded_frames)} frames")
+        torch.cuda.empty_cache()
 
     # Save
     if decoded_frames.ndim == 5:
