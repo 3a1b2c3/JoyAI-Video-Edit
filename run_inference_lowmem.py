@@ -31,12 +31,16 @@ def load_dit_lowmem(cfg, device):
     # Load using standard function
     print("  [1] Loading from checkpoint...")
     dit = load_dit(cfg, device='cpu')
-    print("  [2] Converting to float16...")
+
+    # Move to GPU BEFORE converting to float16 (reduces peak CPU memory)
+    print("  [2] Moving to GPU...")
+    dit = dit.to(device)
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    print("  [3] Converting to float16 on GPU...")
     dit = dit.half()
 
-    # Move to GPU
-    print("  [3] Moving to GPU...")
-    dit = dit.to(device)
     dit.eval()
     dit.requires_grad_(False)
 
