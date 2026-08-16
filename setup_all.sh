@@ -99,12 +99,25 @@ echo "Step 3: Verifying checkpoints..."
 bash download_checkpoints.sh
 echo ""
 
+# Step 4: Save installed versions
+echo "Step 4: Saving installed versions..."
+$PYTHON -m pip freeze > installed_versions.txt
+echo "  ✅ Saved to: installed_versions.txt"
+echo ""
+
 # Final summary
 echo "╔════════════════════════════════════════════════════════════════════╗"
 echo "║                         Setup Complete!                           ║"
 echo "╚════════════════════════════════════════════════════════════════════╝"
 echo ""
 
+echo "Environment:"
+echo "  Python: $PYTHON_PATH"
+echo "  Versions saved: installed_versions.txt"
+echo ""
+
 echo "Next: Run inference"
 echo "  bash run_inference.sh input.mp4 output.mp4"
+echo ""
+echo "Or: python run_inference.py --video input.mp4 --out output.mp4 --frames 1 --height 192 --width 192 --steps 1"
 echo ""
