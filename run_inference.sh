@@ -1,20 +1,30 @@
 #!/bin/bash
-# Run DiT inference - no venv required
+# Run DiT inference with joyomni_ops (fused CUDA operations)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Use system Python (no venv)
+# Setup Python environment
 PYTHON=$(command -v python3 || command -v python)
-
 if [ -z "$PYTHON" ]; then
     echo "ERROR: Python not found"
     exit 1
 fi
 
 echo "Using Python: $PYTHON"
+
+# Setup PYTHONPATH for joyomni_ops
+export PYTHONPATH="$SCRIPT_DIR/deploy:$PYTHONPATH"
+
+# Setup LD_LIBRARY_PATH for PyTorch libraries (joyomni_ops dependency)
+TORCH_LIB=$($PYTHON -c "import torch; print(torch.__path__[0])")/lib
+export LD_LIBRARY_PATH="$TORCH_LIB:$LD_LIBRARY_PATH"
+
+echo "Environment:"
+echo "  PYTHONPATH: $PYTHONPATH"
+echo "  LD_LIBRARY_PATH: $TORCH_LIB"
 echo ""
 
 # Parse arguments (handle spaces in filenames)
@@ -26,7 +36,25 @@ HEIGHT="${5:-256}"
 WIDTH="${6:-256}"
 STEPS="${7:-1}"
 
-# Run memory-efficient inference with properly quoted args
+echo "Configuration:"
+echo "  Video:      $VIDEO"
+echo "  Output:     $OUTPUT"
+echo "  Style:      $REF_IMAGE"
+echo "  Frames:     $FRAMES"
+echo "  Resolution: ${HEIGHT}x${WIDTH}"
+echo "  Steps:      $STEPS"
+echo ""
+
+# Verify joyomni_ops is available
+echo "Checking joyomni_ops..."
+$PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" || {
+    echo "❌ joyomni_ops not found. Run BUILD_JOYOMNI_OPS.md setup first."
+    exit 1
+}
+echo ""
+
+# Run inference
+echo "Running inference..."
 $PYTHON run_inference_lowmem.py \
   --video "$VIDEO" \
   --out "$OUTPUT" \
@@ -38,4 +66,4 @@ $PYTHON run_inference_lowmem.py \
 
 echo ""
 echo "✅ Inference complete!"
-echo "Output: $(cd outputs && pwd)/dit_output.mp4"
+echo "Output: $OUTPUT"
