@@ -17,14 +17,42 @@ fi
 echo "Using Python: $PYTHON"
 echo ""
 
-# Run inference
+# Debug: Show initial memory
+echo "[DEBUG] Initial memory:"
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv,nounits | sed 's/,/ \/ /g' | sed 's/^/  GPU: /' | sed 's/$/ MB/'
+free -h | grep Mem | awk '{print "  RAM: " $3 " used / " $2 " total"}'
+echo ""
+
+# Parse arguments (handle spaces in filenames)
+VIDEO="${1:-assets/Recording 2026-08-12 205529.mp4}"
+OUTPUT="${2:-outputs/dit_output.mp4}"
+FRAMES="${3:-2}"
+HEIGHT="${4:-256}"
+WIDTH="${5:-256}"
+STEPS="${6:-1}"
+
+# Run inference with properly quoted args + memory monitoring
+echo "[DEBUG] Running inference..."
+(while true; do nvidia-smi --query-gpu=memory.used,memory.total --format=csv,nounits | sed 's/,/ \/ /g' | sed 's/^/  [GPU] /' | sed 's/$/ MB/'; free -h | grep Mem | awk '{print "  [RAM] " $3 " \/ " $2}'; sleep 1; done) &
+MONITOR_PID=$!
+
 $PYTHON run_inference.py \
-  --video "${1:-assets/Recording 2026-08-12 205529.mp4}" \
-  --out "${2:-outputs/dit_output.mp4}" \
-  --frames "${3:-2}" \
-  --height "${4:-256}" \
-  --width "${5:-256}" \
-  --steps "${6:-1}"
+  --video "$VIDEO" \
+  --out "$OUTPUT" \
+  --frames "$FRAMES" \
+  --height "$HEIGHT" \
+  --width "$WIDTH" \
+  --steps "$STEPS"
+
+RESULT=$?
+kill $MONITOR_PID 2>/dev/null
+
+echo ""
+echo "[DEBUG] Final memory:"
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv,nounits | sed 's/,/ \/ /g' | sed 's/^/  GPU: /' | sed 's/$/ MB/'
+free -h | grep Mem | awk '{print "  RAM: " $3 " used / " $2 " total"}'
+
+exit $RESULT
 
 echo ""
 echo "✅ Inference complete!"
