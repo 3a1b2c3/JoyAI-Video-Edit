@@ -18,9 +18,10 @@ echo "Using Python: $PYTHON"
 # Setup PYTHONPATH for joyomni_ops
 export PYTHONPATH="$SCRIPT_DIR/deploy:$PYTHONPATH"
 
-# Setup LD_LIBRARY_PATH for PyTorch libraries (joyomni_ops dependency)
+# Setup LD_LIBRARY_PATH for CUDA and PyTorch libraries (joyomni_ops dependencies)
 TORCH_LIB=$($PYTHON -c "import torch; print(torch.__path__[0])")/lib
-export LD_LIBRARY_PATH="$TORCH_LIB:$LD_LIBRARY_PATH"
+CUDA_LIB="/usr/local/cuda-12.4/lib64"
+export LD_LIBRARY_PATH="$CUDA_LIB:$TORCH_LIB:$LD_LIBRARY_PATH"
 
 echo "Environment:"
 echo "  PYTHONPATH: $PYTHONPATH"

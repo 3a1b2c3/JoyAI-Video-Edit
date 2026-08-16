@@ -44,7 +44,8 @@ fi
 # Test import
 echo "[5/5] Testing import..."
 export PYTHONPATH=~/JoyAI-Video-Edit/deploy:$PYTHONPATH
-export LD_LIBRARY_PATH=$(python3 -c "import torch; print(torch.__path__[0])")/lib:$LD_LIBRARY_PATH
+TORCH_LIB=$(python3 -c "import torch; print(torch.__path__[0])")/lib
+export LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64:$TORCH_LIB:$LD_LIBRARY_PATH
 
 python3 << 'PYEOF'
 try:
