@@ -20,15 +20,17 @@ echo ""
 # Parse arguments (handle spaces in filenames)
 VIDEO="${1:-assets/Recording 2026-08-12 205529.mp4}"
 OUTPUT="${2:-outputs/dit_output.mp4}"
-FRAMES="${3:-2}"
-HEIGHT="${4:-256}"
-WIDTH="${5:-256}"
-STEPS="${6:-1}"
+REF_IMAGE="${3:-assets/image.png}"
+FRAMES="${4:-1}"
+HEIGHT="${5:-128}"
+WIDTH="${6:-128}"
+STEPS="${7:-1}"
 
 # Run memory-efficient inference with properly quoted args
 $PYTHON run_inference_lowmem.py \
   --video "$VIDEO" \
   --out "$OUTPUT" \
+  --ref-image "$REF_IMAGE" \
   --frames "$FRAMES" \
   --height "$HEIGHT" \
   --width "$WIDTH" \

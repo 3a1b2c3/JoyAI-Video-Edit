@@ -11,6 +11,7 @@ import torch
 import cv2
 import numpy as np
 import imageio.v3 as iio
+from PIL import Image
 from tqdm import tqdm
 
 SCRIPT_DIR = Path(__file__).parent
@@ -49,6 +50,7 @@ def main():
     parser = argparse.ArgumentParser(description="DiT inference (low memory)")
     parser.add_argument("--video", default="assets/Recording 2026-08-12 205529.mp4")
     parser.add_argument("--out", default="outputs/dit_output_lowmem.mp4")
+    parser.add_argument("--ref-image", default="assets/image.png")
     parser.add_argument("--frames", type=int, default=1)
     parser.add_argument("--height", type=int, default=128)
     parser.add_argument("--width", type=int, default=128)
@@ -91,6 +93,14 @@ def main():
 
     frames_tensor = torch.stack(frames).to(device, dtype=torch.float16)
     print(f"✓ Loaded {len(frames)} frames @ {fps:.1f} fps")
+
+    # Load reference image (style frame)
+    ref_image = None
+    if args.ref_image and Path(args.ref_image).exists():
+        ref_image = Image.open(args.ref_image).convert("RGB")
+        print(f"✓ Loaded reference image: {args.ref_image}")
+    elif args.ref_image:
+        print(f"⚠ Reference image not found: {args.ref_image}")
 
     # Load models with memory efficiency
     print(f"\n[2/5] Loading models (memory-efficient)...")
