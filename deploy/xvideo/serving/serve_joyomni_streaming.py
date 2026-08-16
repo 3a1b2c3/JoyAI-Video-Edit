@@ -528,12 +528,33 @@ def _optional_positive_int(value: Any, *, name: str) -> int | None:
         raise ValueError(f"{name} must be a positive integer, got {parsed}.")
     return parsed
 
+def _preload_gate_detectors(args: argparse.Namespace) -> None:
+    try:
+        import numpy as np
+        det = _get_face_detector(args.face_detector_onnx, float(args.face_gate_score))
+        if det is not None:
+            gw = max(2, int(round(args.width / FACE_DETECTOR_DOWNSAMPLE)))
+            gh = max(2, int(round(args.height / FACE_DETECTOR_DOWNSAMPLE)))
+            det.setInputSize((gw, gh))
+            det.detect(np.zeros((gh, gw, 3), dtype=np.uint8))
+        net = _get_person_net(args.person_detector_onnx)
+        if net is not None:
+            import cv2
+            blob = cv2.dnn.blobFromImage(np.zeros((320, 320, 3), dtype=np.uint8),
+                                         1.0 / 255.0, (320, 320), swapRB=False, crop=False)
+            net.setInput(blob)
+            net.forward()
+        print("#####[GATE] detectors preloaded", flush=True)
+    except Exception as exc:
+        print(f"#####[GATE] detector preload skipped: {exc!r}", flush=True)
+
 def create_app(args: argparse.Namespace) -> FastAPI:
     def get_runtime() -> JoyOmniRuntime:
         if app.state.runtime is not None:
             return app.state.runtime
         with app.state.runtime_lock:
             if app.state.runtime is None:
+                _preload_gate_detectors(args)
                 app.state.runtime = JoyOmniRuntime.load(
                     args.dit_ckpt,
                     vae_ckpt=args.vae_ckpt,
@@ -721,6 +742,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         ref_image: Image.Image | None = None
         face_gate_pending = False
         pe_defer = False
+        pe_task: asyncio.Task | None = None
         session_max_inflight = max(0, int(args.max_inflight_chunks or 0))
         presence_monitor = False
         face_required = False
@@ -1176,6 +1198,16 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             except Exception as exc:
                 ws_debug["rec_error"] = f"prompts: {exc!r}"
 
+        async def _cancel_pe() -> None:
+            nonlocal pe_task
+            if pe_task is not None:
+                pe_task.cancel()
+                try:
+                    await pe_task
+                except BaseException:
+                    pass
+                pe_task = None
+
         def _start_output_task(session_ref) -> None:
             nonlocal output_task
             if session_settings is not None:
@@ -1253,6 +1285,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                     if msg_type == "start":
                         print(f"#####[RESTART] 'start' received (session {'live' if session is not None else 'none'})", flush=True)
                         last_activity = time.monotonic()
+                        await _cancel_pe()
                         if session is not None:
                             print("#####[RESTART] tearing down prior session: stop_output_task", flush=True)
                             await _stop_output_task()
@@ -1424,6 +1457,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                     elif msg_type == "stop":
                         ws_debug["last_message_type"] = "stop"
 
+                        await _cancel_pe()
                         await _stop_output_task()
                         await asyncio.to_thread(_stop_recorders)
                         break
@@ -1808,45 +1842,47 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         await _reset_session("person_returned")
                         continue
                 if isinstance(chunk_results, str) and chunk_results == "__gate_pe__":
-                    anchor = gate_state.get("pe_anchor")
-                    gate_state["pe_anchor"] = None
-                    await _send_json({"type": "pe_running", "frames_in": frames_in})
-                    try:
-                        pe_report = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                _enhance_prompt_sync,
-                                raw_prompt=raw_session_prompt,
-                                ref_image=ref_image,
-                                pe_frame=anchor,
-                                pe_model=args.pe_model,
-                            ),
-                            timeout=max(1.0, float(args.pe_timeout_s)),
-                        )
-                        enhanced = str(pe_report.get("enhanced_prompt") or raw_session_prompt)
+                    if pe_task is None:
+                        anchor = gate_state.get("pe_anchor")
+                        gate_state["pe_anchor"] = None
+                        await _send_json({"type": "pe_running", "frames_in": frames_in})
 
-                        def _swap_prompt(_sess=session, _txt=enhanced, _anchor=anchor):
-                            with app.state.inference_lock:
-                                _sess.prompt = _txt
-                                _sess._initialize(_anchor)
-                        await asyncio.to_thread(_swap_prompt)
-                        print(f"#####[PE] enhanced ok in {float(pe_report.get('elapsed_s', 0.0)):.1f}s "
-                              f"(model={pe_report.get('model')}) -> session initialized", flush=True)
-                        ws_debug["pe_report"] = pe_report
-                        await _send_json({"type": "prompt_enhanced", **pe_report})
-                    except Exception as exc:
-                        _why = "timeout" if isinstance(exc, asyncio.TimeoutError) else repr(exc)
-                        print(f"#####[PE] deferred enhance failed: {_why} -> raw prompt", flush=True)
+                        async def _run_pe(_sess=session, _anchor=anchor, _raw=raw_session_prompt, _ref=ref_image):
+                            nonlocal pe_defer, pe_report, pe_task
+                            try:
+                                report = await asyncio.wait_for(
+                                    asyncio.to_thread(
+                                        _enhance_prompt_sync,
+                                        raw_prompt=_raw, ref_image=_ref,
+                                        pe_frame=_anchor, pe_model=args.pe_model,
+                                    ),
+                                    timeout=max(1.0, float(args.pe_timeout_s)),
+                                )
+                                txt = str(report.get("enhanced_prompt") or _raw)
 
-                        def _init_raw(_sess=session, _anchor=anchor):
-                            with app.state.inference_lock:
-                                _sess._initialize(_anchor)
-                        await asyncio.to_thread(_init_raw)
-                        await _send_json({"type": "prompt_enhanced", "enabled": True,
-                                          "raw_prompt": raw_session_prompt, "enhanced_prompt": raw_session_prompt,
-                                          "fallback": True, "error": True, "elapsed_s": 0.0})
-                    pe_defer = False
+                                def _swap():
+                                    with app.state.inference_lock:
+                                        _sess.prompt = txt
+                                        _sess._initialize(_anchor)
+                                await asyncio.to_thread(_swap)
+                                pe_report = report
+                                ws_debug["pe_report"] = report
+                                await _send_json({"type": "prompt_enhanced", **report})
+                            except Exception:
+                                def _swap_raw():
+                                    with app.state.inference_lock:
+                                        _sess._initialize(_anchor)
+                                await asyncio.to_thread(_swap_raw)
+                                await _send_json({"type": "prompt_enhanced", "enabled": True,
+                                                  "raw_prompt": _raw, "enhanced_prompt": _raw,
+                                                  "fallback": True, "error": True, "elapsed_s": 0.0})
+                            finally:
+                                pe_defer = False
+                                pe_task = None
+                                _write_prompt_sidecar()
+
+                        pe_task = asyncio.create_task(_run_pe())
                     last_activity = time.monotonic()
-                    _write_prompt_sidecar()
                     continue
                 if isinstance(chunk_results, str):
                     await _send_json({"type": "waiting_face", "reason": chunk_results, "frames_in": frames_in})
@@ -1899,6 +1935,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 raise
         finally:
             try:
+                await _cancel_pe()
                 await _stop_output_task()
                 await asyncio.to_thread(_stop_recorders)
                 if session is not None:

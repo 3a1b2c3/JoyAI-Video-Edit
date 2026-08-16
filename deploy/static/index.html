@@ -368,7 +368,7 @@ const I18N = {
     q_downgrade_auto: " · 已自动降到低画质", q_downgrade_hint: " · 建议降低画质",
     flow_drop_tail: " · 带宽不足，正在丢帧保延迟",
     up_clamp_tail: " · 上行带宽不足，已临时降低上传画质",
-    res_notice: "本演示运行在 {res}，并非模型原生的 720×1248 分辨率",
+    res_notice: "本演示运行在 {res}，并非模型原生的 1248×720 分辨率，画质与编辑效果会略有下降",
   },
   en: {
     tagline: "Streaming video editing",
@@ -429,7 +429,7 @@ const I18N = {
     q_downgrade_auto: " · auto-lowered to low quality", q_downgrade_hint: " · consider lowering quality",
     flow_drop_tail: " · bandwidth limited, dropping frames",
     up_clamp_tail: " · uplink limited, upload quality lowered",
-    res_notice: "This demo runs at {res}, not the model's native 720×1248 resolution",
+    res_notice: "This demo runs at {res}, not the model's native 1248×720 resolution; visual quality and edit fidelity are slightly reduced",
   },
 };
 let currentLang = localStorage.getItem("joyomni_lang") || "en";
@@ -1666,7 +1666,7 @@ async function beginSession() {
     input_codec: upCodecH264 ? "h264" : "mjpeg",
     no_person_blank: faceGateDebugEnabled(),
     require_face: faceGateDebugEnabled(),
-    person_count_reedit: false
+    person_count_reedit: faceGateDebugEnabled()
   };
   if (usingVideoFile) {
     startPayload.source = "file";
