@@ -1,6 +1,6 @@
---extra-index-url https://download.pytorch.org/whl/cu124
-torch==2.9.1+cu128
-torchvision==0.24.1+cu128
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch==2.9.1+cu130
+torchvision==0.24.1+cu130
 transformers>=4.57.1,<4.58
 accelerate==1.10.1
 diffusers==0.36.0
@@ -12,10 +12,9 @@ av==13.1.0
 imageio-ffmpeg==0.6.0
 fastapi==0.117.1
 uvicorn==0.37.0
-uvloop==0.22.1
-ninja==1.13.0
 websockets==16.0
 openai==2.41.0
 loguru==0.7.3
+ninja==1.13.0
 setuptools>=68.0.0
 wheel>=0.42.0
