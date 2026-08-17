@@ -216,23 +216,34 @@ torch.cuda.empty_cache()
 mem_after_cleanup = torch.cuda.memory_allocated() / 1e9
 print(f"  ✓ DiT loaded (final: {mem_after_cleanup:.1f}GB)")
 
-# Load VAE
-print("  Loading VAE (float16)...")
+# Load VAE + text encoder on CPU (DiT uses all GPU memory)
+print("  Loading VAE (float16, CPU)...")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
-mem_before_vae = torch.cuda.memory_allocated() / 1e9
-print(f"    Memory before: {mem_before_vae:.1f}GB")
 vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
-mem_after_vae_load = torch.cuda.memory_allocated() / 1e9
-print(f"    Memory after load: {mem_after_vae_load:.1f}GB (+{mem_after_vae_load - mem_before_vae:.1f}GB)")
-
-print(f"  Moving VAE to device...")
-vae = vae.to(device)
-mem_after_vae_device = torch.cuda.memory_allocated() / 1e9
-print(f"    Memory on device: {mem_after_vae_device:.1f}GB ({mem_after_vae_device - mem_after_vae_load:.1f}GB)")
-
+vae = vae.to("cpu")
 vae.eval()
 vae.requires_grad_(False)
-print(f"  ✓ VAE loaded (float16)")
+print(f"  ✓ VAE loaded (float16, CPU)")
+
+# Load text encoder on CPU if available
+try:
+    print("  Loading text encoder (CPU)...")
+    text_encoder_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/text_encoder")
+    if text_encoder_ckpt.exists():
+        from xvideo.models.models import load_text_encoder
+        tokenizer, text_encoder = load_text_encoder(
+            str(text_encoder_ckpt),
+            device=torch.device("cpu"),
+            torch_dtype=torch.float16
+        )
+        text_encoder.eval()
+        print(f"  ✓ Text encoder loaded (CPU)")
+except Exception as e:
+    print(f"  ⚠ Text encoder not available: {e}")
+    text_encoder = None
+    tokenizer = None
+
+print(f"  Note: VAE/text encode/decode run on CPU (slower but fits GPU)")
 
 # Clear memory and summary
 gc.collect()
