@@ -20,8 +20,8 @@ echo "DEBUG: System Info"
 $PYTHON -c "import sys, torch; print(f'  Python: {sys.version}'); print(f'  PyTorch: {torch.__version__}'); print(f'  CUDA: {torch.version.cuda}')"
 echo ""
 
-# Setup PYTHONPATH for joyomni_ops
-export PYTHONPATH="$SCRIPT_DIR/deploy:$SCRIPT_DIR/deploy/joyomni_ops:${PYTHONPATH:-}"
+# Setup PYTHONPATH for joyomni_ops (MUST be first for import to work)
+export PYTHONPATH="$SCRIPT_DIR/deploy/joyomni_ops:$SCRIPT_DIR/deploy:${PYTHONPATH:-}"
 
 # Setup LD_LIBRARY_PATH for CUDA and PyTorch
 TORCH_LIB=$($PYTHON -c "import torch; print(torch.__path__[0])")/lib
