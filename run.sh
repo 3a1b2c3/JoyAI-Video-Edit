@@ -45,7 +45,7 @@ echo ""
 
 # Parse arguments
 VIDEO="${1:-assets/Recording 2026-08-12 205529.mp4}"
-OUTPUT="${2:-outputs/dit_output.mp4}"
+OUTPUT="${2:-$SCRIPT_DIR/outputs/dit_output.mp4}"
 REF_IMAGE="${3:-assets/image.png}"
 FRAMES="${4:-1}"
 HEIGHT="${5:-256}"
@@ -344,6 +344,7 @@ with torch.no_grad():
 
 # Save
 output_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/dit_output.mp4"
+output_path = str(Path(output_path).resolve())  # absolute path (cwd = script dir)
 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
 import imageio.v3 as iio
