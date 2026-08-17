@@ -1,7 +1,9 @@
 #!/bin/bash
 # Run DiT inference on horde with joyomni_ops
 
-set -e
+set -euo pipefail  # fail on error, undefined vars, pipe failures
+
+trap 'echo "ERROR on line $LINENO"; exit 1' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -71,15 +73,16 @@ fi
 
 # Verify joyomni_ops (fail hard if missing)
 echo "Checking joyomni_ops..."
-if ! $PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" 2>&1; then
+if ! OUTPUT=$($PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" 2>&1); then
     echo ""
     echo "=========================================="
-    echo "❌ FATAL: joyomni_ops not found"
+    echo "❌ FATAL: joyomni_ops import failed"
     echo "=========================================="
+    echo ""
+    echo "Error output:"
+    echo "$OUTPUT"
     echo ""
     echo "joyomni_ops._C.cpython-310-x86_64.pyd must be built first."
-    echo ""
-    echo "Build location: deploy/joyomni_ops/"
     echo ""
     echo "Check if .pyd exists:"
     echo "  ls -la deploy/joyomni_ops/joyomni_ops/_C*.pyd"
@@ -91,6 +94,7 @@ if ! $PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyo
     echo ""
     exit 1
 fi
+echo "$OUTPUT"
 echo ""
 
 # Create output directory
