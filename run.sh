@@ -264,17 +264,31 @@ mem_before_encode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
 with torch.no_grad():
     frames_chw = frames_tensor.permute(0, 3, 1, 2)
+    # Move to CPU for VAE encoding (VAE is on CPU)
+    frames_chw = frames_chw.to("cpu")
     latents_list = []
     for i in tqdm(range(len(frames_chw)), desc="Encoding"):
         try:
             z = frames_chw[i:i+1].unsqueeze(2)
+            print(f"    Frame {i}: input shape {z.shape}, device {z.device}")
             posterior = vae.encode(z).latent_dist
-            latents_list.append(posterior.sample() * 0.18215)
-            torch.cuda.empty_cache()
+            sample = posterior.sample() * 0.18215
+            print(f"    Frame {i}: latent shape {sample.shape}, device {sample.device}")
+            latents_list.append(sample)
         except Exception as e:
-            print(f"Frame {i}: {e}")
+            print(f"    Frame {i} ERROR: {e}")
+            import traceback
+            traceback.print_exc()
             continue
-    latents = torch.cat(latents_list, dim=0) if latents_list else frames_chw[:1]
+    print(f"  latents_list length: {len(latents_list)}")
+    if latents_list:
+        latents = torch.cat(latents_list, dim=0)
+    else:
+        print("  WARNING: latents_list empty, using raw frames")
+        latents = frames_chw[:1]
+    # Move latents back to GPU for diffusion
+    latents = latents.to("cuda")
+    print(f"  Final latents shape: {latents.shape}")
     gc.collect()
     torch.cuda.empty_cache()
     mem_after_encode = torch.cuda.memory_allocated() / 1e9
