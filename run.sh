@@ -192,10 +192,17 @@ print()
 print("[2/5] Loading models (float16, memory-efficient)...")
 import gc
 
+# Verify quantized checkpoint exists
+dit_ckpt_path = Path("dit_quantized.pth")
+if not dit_ckpt_path.exists():
+    print(f"ERROR: Quantized checkpoint not found: {dit_ckpt_path}")
+    print("Run: python quantize_simple.py <input> dit_quantized.pth")
+    sys.exit(1)
+
 cfg = ExpConfig()
 cfg.training_mode = False
 cfg.dit_precision = "bf16"  # joyomni_ops CUDA kernels require bf16, not fp16
-cfg.dit_ckpt = str(Path("dit_quantized.pth"))  # Use quantized (2x smaller) checkpoint
+cfg.dit_ckpt = str(dit_ckpt_path)  # Use quantized (2x smaller) checkpoint
 
 # Load DiT directly in float16 (avoiding temporary float32 copy that causes OOM)
 print("  Loading DiT (direct to GPU in float16, no conversion)...")
