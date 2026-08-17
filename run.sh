@@ -15,6 +15,10 @@ if [ -z "$PYTHON" ]; then
 fi
 
 echo "Using Python: $PYTHON"
+echo ""
+echo "DEBUG: System Info"
+$PYTHON -c "import sys, torch; print(f'  Python: {sys.version}'); print(f'  PyTorch: {torch.__version__}'); print(f'  CUDA: {torch.version.cuda}')"
+echo ""
 
 # Setup PYTHONPATH for joyomni_ops
 export PYTHONPATH="$SCRIPT_DIR/deploy:$SCRIPT_DIR/deploy/joyomni_ops:${PYTHONPATH:-}"
@@ -135,7 +139,10 @@ from xvideo.models.pipeline import PRECISION_TO_TYPE
 device = torch.device("cuda")
 print(f"Device: {device}")
 print(f"GPU: {torch.cuda.get_device_name(0)}")
-print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
+print(f"Compute Capability: {torch.cuda.get_device_capability(0)}")
+print(f"VRAM Total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
+print(f"VRAM Allocated: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
+print(f"VRAM Reserved: {torch.cuda.memory_reserved() / 1e9:.1f}GB")
 print()
 
 seed_everything(42)
@@ -189,12 +196,18 @@ cfg.dit_ckpt = str(Path("deploy/deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_
 
 # Load DiT directly to GPU in float16
 print("  Loading DiT (direct to GPU, float16)...")
+mem_before = torch.cuda.memory_allocated() / 1e9
+print(f"    Memory before: {mem_before:.1f}GB")
 dit = load_dit(cfg, device=device)
-dit = dit.to(device, dtype=torch.float16)
+mem_after_load = torch.cuda.memory_allocated() / 1e9
+print(f"    Memory after load_dit: {mem_after_load:.1f}GB (+{mem_after_load - mem_before:.1f}GB)")
 
-# Ensure all buffers are float16
+print(f"  Converting to float16...")
+dit = dit.to(device, dtype=torch.float16)
 for buffer in dit.buffers():
     buffer.data = buffer.data.to(dtype=torch.float16)
+mem_after_convert = torch.cuda.memory_allocated() / 1e9
+print(f"    Memory after convert: {mem_after_convert:.1f}GB ({mem_after_convert - mem_after_load:.1f}GB)")
 
 dit.eval()
 dit.requires_grad_(False)
@@ -203,8 +216,17 @@ print(f"  ✓ DiT loaded (float16)")
 # Load VAE
 print("  Loading VAE (float16)...")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
+mem_before_vae = torch.cuda.memory_allocated() / 1e9
+print(f"    Memory before: {mem_before_vae:.1f}GB")
 vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
+mem_after_vae_load = torch.cuda.memory_allocated() / 1e9
+print(f"    Memory after load: {mem_after_vae_load:.1f}GB (+{mem_after_vae_load - mem_before_vae:.1f}GB)")
+
+print(f"  Moving VAE to device...")
 vae = vae.to(device)
+mem_after_vae_device = torch.cuda.memory_allocated() / 1e9
+print(f"    Memory on device: {mem_after_vae_device:.1f}GB ({mem_after_vae_device - mem_after_vae_load:.1f}GB)")
+
 vae.eval()
 vae.requires_grad_(False)
 print(f"  ✓ VAE loaded (float16)")
