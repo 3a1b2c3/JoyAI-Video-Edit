@@ -123,7 +123,7 @@ echo "  Steps: $STEPS"
 echo ""
 
 # Load models and run diffusion
-$PYTHON << 'PYEOF'
+$PYTHON -u << 'PYEOF'
 import sys
 import gc
 import torch
@@ -131,6 +131,16 @@ import cv2
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
+
+# Ensure errors are always printed
+import traceback as tb_module
+def show_error(exc_type, exc_value, exc_traceback):
+    print(f"\n{'='*70}")
+    print(f"❌ UNHANDLED ERROR: {exc_type.__name__}")
+    print(f"{'='*70}")
+    tb_module.print_exception(exc_type, exc_value, exc_traceback)
+    sys.exit(1)
+sys.excepthook = show_error
 
 # Import inference components
 sys.path.insert(0, './deploy')
@@ -374,9 +384,11 @@ try:
     print(f"\n✓ Output saved:")
     print(f"  {output_path}")
 except Exception as e:
-    print(f"\n❌ ERROR saving output: {e}")
+    print(f"\n❌ ERROR saving output: {e}", flush=True)
     import traceback
     traceback.print_exc()
+    sys.stdout.flush()
+    sys.stderr.flush()
     sys.exit(1)
 print("=" * 70)
 print("✅ INFERENCE COMPLETE")
