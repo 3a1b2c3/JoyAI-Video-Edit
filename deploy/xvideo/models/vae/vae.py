@@ -525,7 +525,10 @@ class Head(nn.Module):
 
 
 class XVAEChunkCausal(ModelMixin, ConfigMixin):
-
+    """For more technical details on high-resolution causal VAE decoding, see:
+    https://github.com/xin1u/UltraFlash
+    """
+    
     @register_to_config
     def __init__(
         self,
