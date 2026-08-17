@@ -349,7 +349,7 @@ const I18N = {
     gate_off_center: "请把脸移到画面中间",
     pe_running: "画面就绪，正在增强提示词",
     stage_pil: "PIL→张量", stage_vae_enc: "VAE 编码", stage_dit: "DiT 去噪",
-    stage_kv: "KV cache", stage_vae_dec: "VAE 解码", stage_jpeg: "JPEG 解码",
+    stage_kv: "KV cache", stage_vae_dec: "VAE 解码", stage_jpeg: "JPEG 解码", stage_h264: "H264 编码",
     stage_q_enc: "排队·编码", stage_q_dit: "排队·DiT", stage_q_dec: "排队·解码",
     stage_q_pseudo: "排队·伪编码", stage_q_post: "排队·后处理",
     stage_ws: "WS 发送", stage_total: "服务端合计", stage_residence: "服务端驻留",
@@ -410,7 +410,7 @@ const I18N = {
     gate_off_center: "Move your face to the center",
     pe_running: "Frame ready, enhancing the prompt",
     stage_pil: "PIL→Tensor", stage_vae_enc: "VAE encode", stage_dit: "DiT denoise",
-    stage_kv: "KV cache", stage_vae_dec: "VAE decode", stage_jpeg: "JPEG decode",
+    stage_kv: "KV cache", stage_vae_dec: "VAE decode", stage_jpeg: "JPEG decode", stage_h264: "H264 encode",
     stage_q_enc: "Queue·encode", stage_q_dit: "Queue·DiT", stage_q_dec: "Queue·decode",
     stage_q_pseudo: "Queue·pseudo", stage_q_post: "Queue·post",
     stage_ws: "WS send", stage_total: "Server total", stage_residence: "Server residence",
@@ -941,6 +941,9 @@ function renderStageTimings() {
   push(t("stage_dit"), "dit_denoise_s", "accent");
   push(t("stage_kv"), "kv_store_s");
   push(t("stage_vae_dec"), "vae_decode_s");
+  if (Number.isFinite(Number(p.h264_encode_s))) {
+    cards.push(statCell(t("stage_h264"), fmt(Number(p.h264_encode_s) * 1000, "ms")));
+  }
   push(t("stage_q_enc"), "q_wait_encode_s");
   push(t("stage_q_dit"), "q_wait_dit_s");
   push(t("stage_q_dec"), "q_wait_decode_s");
