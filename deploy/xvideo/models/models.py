@@ -80,7 +80,7 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     model = Transformer3DModel(
         dtype=dtype, device=device, **_arch_params(cfg.dit_arch_config)
     )
-    # Model already created on device, skip redundant .to() that causes OOM
+    model = model.to(device=device)
 
     if state_dict is not None:
         for prefix in ("model.", "module.", "transformer."):
