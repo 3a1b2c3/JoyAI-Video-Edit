@@ -22,9 +22,16 @@ TORCH_LIB=$($PYTHON -c "import torch; print(torch.__path__[0])")/lib
 CUDA_LIB="${CUDA_HOME:-/usr/local/cuda-12.4}/lib64"
 export LD_LIBRARY_PATH="$CUDA_LIB:$TORCH_LIB:$LD_LIBRARY_PATH"
 
+# Setup checkpoint caching (faster loading on horde)
+export TORCH_HOME="$SCRIPT_DIR/.cache/torch"
+export HF_HOME="$SCRIPT_DIR/.cache/huggingface"
+mkdir -p "$TORCH_HOME" "$HF_HOME"
+
 echo "Environment:"
 echo "  PYTHONPATH: $PYTHONPATH"
 echo "  LD_LIBRARY_PATH: $CUDA_LIB:$TORCH_LIB"
+echo "  TORCH_HOME: $TORCH_HOME (cached)"
+echo "  HF_HOME: $HF_HOME (cached)"
 echo ""
 
 # Parse arguments
