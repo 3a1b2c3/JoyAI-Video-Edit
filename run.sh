@@ -26,7 +26,7 @@ export PYTHONPATH="$SCRIPT_DIR/deploy:$SCRIPT_DIR/deploy/joyomni_ops:${PYTHONPAT
 # Setup LD_LIBRARY_PATH for CUDA and PyTorch
 TORCH_LIB=$($PYTHON -c "import torch; print(torch.__path__[0])")/lib
 CUDA_LIB="${CUDA_HOME:-/usr/local/cuda-12.4}/lib64"
-export LD_LIBRARY_PATH="$CUDA_LIB:$TORCH_LIB:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$CUDA_LIB:$TORCH_LIB:${LD_LIBRARY_PATH:-}"
 
 # Setup checkpoint caching (faster loading on horde)
 export TORCH_HOME="$SCRIPT_DIR/.cache/torch"
