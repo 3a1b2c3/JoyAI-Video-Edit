@@ -231,11 +231,11 @@ vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
 vae = vae.to("cuda")
 vae.eval()
 vae.requires_grad_(False)
-print(f"  ✓ VAE loaded (float16, CPU)")
+print(f"  ✓ VAE loaded (float16, GPU)")
 
-# Load text encoder on CPU if available
+# Load text encoder on GPU if available
 try:
-    print("  Loading text encoder (CPU)...")
+    print("  Loading text encoder (GPU)...")
     text_encoder_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/text_encoder")
     if text_encoder_ckpt.exists():
         from xvideo.models.models import load_text_encoder
@@ -245,7 +245,7 @@ try:
             torch_dtype=torch.float16
         )
         text_encoder.eval()
-        print(f"  ✓ Text encoder loaded (CPU)")
+        print(f"  ✓ Text encoder loaded (GPU)")
 except Exception as e:
     print(f"  ⚠ Text encoder not available: {e}")
     text_encoder = None
@@ -364,13 +364,20 @@ output_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/dit_output.mp4"
 output_path = str(Path(output_path).resolve())  # absolute path (cwd = script dir)
 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-import imageio.v3 as iio
-if decoded.ndim == 5:
-    decoded = decoded.squeeze(2)
-output_frames = (decoded.to(torch.float32).permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
-iio.imwrite(output_path, output_frames, fps=fps)
-print(f"\n✓ Output saved:")
-print(f"  {output_path}")
+try:
+    import imageio.v3 as iio
+    if decoded.ndim == 5:
+        decoded = decoded.squeeze(2)
+    output_frames = (decoded.to(torch.float32).permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
+    print(f"  Saving {len(output_frames)} frames to {output_path}")
+    iio.imwrite(output_path, output_frames, fps=fps)
+    print(f"\n✓ Output saved:")
+    print(f"  {output_path}")
+except Exception as e:
+    print(f"\n❌ ERROR saving output: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
 print("=" * 70)
 print("✅ INFERENCE COMPLETE")
 print("=" * 70)
