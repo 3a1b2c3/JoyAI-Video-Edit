@@ -191,27 +191,27 @@ import gc
 
 cfg = ExpConfig()
 cfg.training_mode = False
-cfg.dit_precision = "fp16"  # Set precision before loading
+cfg.dit_precision = "fp16"  # Load directly in float16 (not convert after)
 cfg.dit_ckpt = str(Path("deploy/deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth"))
 
-# Load DiT directly to GPU in float16
-print("  Loading DiT (direct to GPU, float16)...")
+# Load DiT directly in float16 (avoiding temporary float32 copy that causes OOM)
+print("  Loading DiT (direct to GPU in float16, no conversion)...")
 mem_before = torch.cuda.memory_allocated() / 1e9
-print(f"    Memory before: {mem_before:.1f}GB")
+print(f"    GPU memory before: {mem_before:.1f}GB")
+
 dit = load_dit(cfg, device=device)
 mem_after_load = torch.cuda.memory_allocated() / 1e9
-print(f"    Memory after load_dit: {mem_after_load:.1f}GB (+{mem_after_load - mem_before:.1f}GB)")
+print(f"    GPU memory after load: {mem_after_load:.1f}GB (+{mem_after_load - mem_before:.1f}GB)")
 
-print(f"  Converting to float16...")
-dit = dit.to(device, dtype=torch.float16)
-for buffer in dit.buffers():
-    buffer.data = buffer.data.to(dtype=torch.float16)
-mem_after_convert = torch.cuda.memory_allocated() / 1e9
-print(f"    Memory after convert: {mem_after_convert:.1f}GB ({mem_after_convert - mem_after_load:.1f}GB)")
+# Verify dtype
+model_dtype = next(dit.parameters()).dtype
+print(f"    Model dtype: {model_dtype}")
 
 dit.eval()
 dit.requires_grad_(False)
-print(f"  ✓ DiT loaded (float16)")
+torch.cuda.empty_cache()
+mem_after_cleanup = torch.cuda.memory_allocated() / 1e9
+print(f"  ✓ DiT loaded (final: {mem_after_cleanup:.1f}GB)")
 
 # Load VAE
 print("  Loading VAE (float16)...")
@@ -231,14 +231,23 @@ vae.eval()
 vae.requires_grad_(False)
 print(f"  ✓ VAE loaded (float16)")
 
-# Clear memory
+# Clear memory and summary
 gc.collect()
 torch.cuda.empty_cache()
-print(f"  Memory after loading: {torch.cuda.memory_allocated() / 1e9:.1f}GB / {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
+mem_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+mem_allocated = torch.cuda.memory_allocated() / 1e9
+mem_reserved = torch.cuda.memory_reserved() / 1e9
+print(f"  GPU memory summary:")
+print(f"    Allocated: {mem_allocated:.1f}GB")
+print(f"    Reserved:  {mem_reserved:.1f}GB")
+print(f"    Total:     {mem_total:.1f}GB")
+print(f"    Available: {mem_total - mem_reserved:.1f}GB")
 print()
 
 # Encode
 print("[3/5] VAE encoding...")
+mem_before_encode = torch.cuda.memory_allocated() / 1e9
+print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
 with torch.no_grad():
     frames_chw = frames_tensor.permute(0, 3, 1, 2)
     latents_list = []
@@ -254,13 +263,16 @@ with torch.no_grad():
     latents = torch.cat(latents_list, dim=0) if latents_list else frames_chw[:1]
     gc.collect()
     torch.cuda.empty_cache()
+    mem_after_encode = torch.cuda.memory_allocated() / 1e9
     print(f"✓ Encoded to {latents.shape}")
-    print(f"  Memory: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
+    print(f"  Memory: {mem_after_encode:.1f}GB ({mem_after_encode - mem_before_encode:+.1f}GB)")
 print()
 
 # Diffusion
 steps = int(sys.argv[7]) if len(sys.argv) > 7 else 1
 print(f"[4/5] Diffusion ({steps} steps)...")
+mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
+print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
 with torch.no_grad():
     for step in tqdm(range(steps), desc="Denoising"):
         t = (steps - step - 1) / steps
@@ -275,11 +287,15 @@ with torch.no_grad():
         torch.cuda.empty_cache()
 gc.collect()
 torch.cuda.empty_cache()
-print(f"✓ Diffusion complete (Memory: {torch.cuda.memory_allocated() / 1e9:.1f}GB)")
+mem_after_diffusion = torch.cuda.memory_allocated() / 1e9
+print(f"✓ Diffusion complete")
+print(f"  Memory: {mem_after_diffusion:.1f}GB ({mem_after_diffusion - mem_before_diffusion:+.1f}GB)")
 print()
 
 # Decode
 print("[5/5] Decoding...")
+mem_before_decode = torch.cuda.memory_allocated() / 1e9
+print(f"  Memory before decoding: {mem_before_decode:.1f}GB")
 with torch.no_grad():
     latents_decoded = latents / 0.18215
     frames_decoded = []
@@ -294,8 +310,9 @@ with torch.no_grad():
     decoded = torch.cat(frames_decoded, dim=0) if frames_decoded else latents_decoded[:1]
     gc.collect()
     torch.cuda.empty_cache()
+    mem_after_decode = torch.cuda.memory_allocated() / 1e9
     print(f"✓ Decoded {len(decoded)} frames")
-    print(f"  Memory: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
+    print(f"  Memory: {mem_after_decode:.1f}GB ({mem_after_decode - mem_before_decode:+.1f}GB)")
 
 # Save
 output_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/dit_output.mp4"

@@ -92,6 +92,10 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
 
         load_state_dict = {}
         for k, v in state_dict.items():
+            # Convert tensor to model's dtype/device immediately to avoid OOM from temp copies
+            if isinstance(v, torch.Tensor):
+                v = v.to(device=device, dtype=dtype, non_blocking=True)
+
             if (
                 k == "img_in.weight" and
                 hasattr(model, "img_in") and
