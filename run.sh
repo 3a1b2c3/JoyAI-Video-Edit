@@ -204,8 +204,8 @@ cfg.training_mode = False
 cfg.dit_precision = "bf16"  # joyomni_ops CUDA kernels require bf16, not fp16
 cfg.dit_ckpt = str(dit_ckpt_path)  # Use quantized (2x smaller) checkpoint
 
-# Load DiT directly in float16 (avoiding temporary float32 copy that causes OOM)
-print("  Loading DiT (direct to GPU in float16, no conversion)...")
+# Load DiT with quantized checkpoint (auto-dequantizes int8 tensors)
+print("  Loading DiT (quantized checkpoint, auto-dequantized to bf16)...")
 mem_before = torch.cuda.memory_allocated() / 1e9
 print(f"    GPU memory before: {mem_before:.1f}GB")
 

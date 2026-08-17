@@ -38,7 +38,7 @@ print(f"  Latents: {latents.shape}")
 
 with torch.no_grad():
     t = torch.tensor([500], device=device, dtype=torch.long)
-    context = torch.randn(1, 256, 4096, dtype=torch.float16, device=device)
+    context = torch.randn(1, 256, 4096, dtype=torch.bfloat16, device=device)
     print(f"  Running forward pass...")
     output = dit(latents, t, context)
     if isinstance(output, tuple):

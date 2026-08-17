@@ -92,12 +92,16 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
 
         load_state_dict = {}
         for k, v in state_dict.items():
-            # Keep checkpoint tensors on CPU (mmap'd). Convert to target dtype on CPU (fast).
-            # PyTorch will transfer to GPU during load_state_dict.
-            if isinstance(v, torch.Tensor):
+            # Handle quantized checkpoints (dict with data+scale) and normal tensors
+            if isinstance(v, dict) and "data" in v:
+                # Quantized tensor: dequantize
+                v = v["data"].float() * v["scale"]
+                v = v.to(dtype=dtype)
+            elif isinstance(v, torch.Tensor):
                 v = v.to(dtype=dtype)
 
             if (
+                isinstance(v, torch.Tensor) and
                 k == "img_in.weight" and
                 hasattr(model, "img_in") and
                 model.img_in.weight.shape != v.shape
