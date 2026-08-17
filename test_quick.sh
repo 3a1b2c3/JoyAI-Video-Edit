@@ -32,7 +32,7 @@ print()
 
 # Synthetic latents (skip 18min VAE)
 print("[2/2] Testing diffusion with synthetic latents...")
-latents = torch.randn(1, 4, 1, 32, 32, dtype=torch.float16, device=device)
+latents = torch.randn(1, 64, 1, 32, 32, dtype=torch.float16, device=device)
 print(f"  Latents: {latents.shape}")
 
 with torch.no_grad():

@@ -273,7 +273,9 @@ with torch.no_grad():
             print(f"    Frame {i}: input shape {z.shape}, device {z.device}")
             posterior = vae.encode(z).latent_dist
             sample = posterior.sample() * 0.18215
-            print(f"    Frame {i}: latent shape {sample.shape}, device {sample.device}")
+            print(f"    Frame {i}: latent shape {sample.shape}, channels={sample.shape[1]}, device {sample.device}")
+            if sample.shape[1] != 64:
+                print(f"    ⚠ WARNING: Expected 64 channels, got {sample.shape[1]}")
             latents_list.append(sample)
         except Exception as e:
             print(f"    Frame {i} ERROR: {e}")
