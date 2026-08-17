@@ -122,9 +122,9 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
 
-    # Convert to target dtype (bf16 for joyomni_ops, fp16 otherwise)
+    # Move to device and convert to target dtype (bf16 for joyomni_ops, fp16 otherwise)
     target_dtype = PRECISION_TO_TYPE[cfg.dit_precision]
-    model = model.to(dtype=target_dtype)
+    model = model.to(device=device, dtype=target_dtype)
 
     return model.eval()
 

@@ -44,7 +44,7 @@ echo "  HF_HOME: $HF_HOME (cached)"
 echo ""
 
 # Parse arguments
-VIDEO="${1:-assets/Recording 2026-08-12 205529.mp4}"
+VIDEO="${1:-assets/cases/omnidream/mattress.mp4}"
 OUTPUT="${2:-$SCRIPT_DIR/outputs/dit_output.mp4}"
 REF_IMAGE="${3:-assets/image.png}"
 FRAMES="${4:-1}"
