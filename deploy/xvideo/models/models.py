@@ -92,11 +92,10 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
 
         load_state_dict = {}
         for k, v in state_dict.items():
-            # Load checkpoint tensors to GPU in fp32 (model dtype).
-            # BLOCKING copy (no non_blocking): the source tensors are mmap'd (not pinned),
-            # so an async H2D transfer races -> "CUDA driver error: device not ready".
+            # Keep checkpoint tensors on CPU (mmap'd). PyTorch will transfer to GPU
+            # during load_state_dict. Converting dtype here is OK (CPU is fast).
             if isinstance(v, torch.Tensor):
-                v = v.to(device=device, dtype=torch.float32)
+                v = v.to(dtype=torch.float32)
 
             if (
                 k == "img_in.weight" and
