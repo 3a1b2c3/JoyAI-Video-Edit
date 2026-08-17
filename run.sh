@@ -17,7 +17,7 @@ fi
 echo "Using Python: $PYTHON"
 
 # Setup PYTHONPATH for joyomni_ops
-export PYTHONPATH="$SCRIPT_DIR/deploy:$SCRIPT_DIR/deploy/joyomni_ops:$PYTHONPATH"
+export PYTHONPATH="$SCRIPT_DIR/deploy:$SCRIPT_DIR/deploy/joyomni_ops:${PYTHONPATH:-}"
 
 # Setup LD_LIBRARY_PATH for CUDA and PyTorch
 TORCH_LIB=$($PYTHON -c "import torch; print(torch.__path__[0])")/lib
