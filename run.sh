@@ -194,7 +194,7 @@ import gc
 
 cfg = ExpConfig()
 cfg.training_mode = False
-cfg.dit_precision = "fp16"  # Load directly in float16 (not convert after)
+cfg.dit_precision = "bf16"  # joyomni_ops CUDA kernels require bf16, not fp16
 cfg.dit_ckpt = str(Path("deploy/deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth"))
 
 # Load DiT directly in float16 (avoiding temporary float32 copy that causes OOM)
