@@ -76,11 +76,11 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
         if "model" in state_dict:
             state_dict = state_dict["model"]
 
-    dtype = PRECISION_TO_TYPE[cfg.dit_precision]
+    # Load model in fp32 to avoid dtype mismatch during initialization,
+    # then convert to target dtype after all internal tensors are created
     model = Transformer3DModel(
-        dtype=dtype, device=device, **_arch_params(cfg.dit_arch_config)
+        dtype=torch.float32, device=device, **_arch_params(cfg.dit_arch_config)
     )
-    # Model already on device from constructor, skip redundant .to() that OOMs
 
     if state_dict is not None:
         for prefix in ("model.", "module.", "transformer."):
@@ -92,11 +92,11 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
 
         load_state_dict = {}
         for k, v in state_dict.items():
-            # Convert tensor to model's dtype/device immediately to avoid OOM from temp copies.
+            # Load checkpoint tensors to GPU in fp32 (model dtype).
             # BLOCKING copy (no non_blocking): the source tensors are mmap'd (not pinned),
             # so an async H2D transfer races -> "CUDA driver error: device not ready".
             if isinstance(v, torch.Tensor):
-                v = v.to(device=device, dtype=dtype)
+                v = v.to(device=device, dtype=torch.float32)
 
             if (
                 k == "img_in.weight" and
@@ -123,13 +123,9 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
 
-    param_dtypes = {param.dtype for param in model.parameters()}
-    if len(param_dtypes) > 1:
-        logger.warning(f"Model has mixed dtypes: {param_dtypes}. Converting to {dtype}")
-        model = model.to(dtype)
-
-    # Move model to device (checkpoint freed above)
-    model = model.to(device)
+    # Convert to target dtype (bf16 for joyomni_ops, fp16 otherwise)
+    target_dtype = PRECISION_TO_TYPE[cfg.dit_precision]
+    model = model.to(dtype=target_dtype)
 
     return model.eval()
 

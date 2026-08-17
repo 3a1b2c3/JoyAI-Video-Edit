@@ -184,7 +184,7 @@ for i in range(min(frames_to_load, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))):
     frames.append(torch.from_numpy(rgb).float() / 255.0)
 cap.release()
 
-frames_tensor = torch.stack(frames).to(device, dtype=torch.float16)
+frames_tensor = torch.stack(frames).to(device, dtype=torch.bfloat16)
 print(f"✓ Loaded {len(frames)} frames @ {fps:.1f} fps")
 print()
 
@@ -308,7 +308,7 @@ with torch.no_grad():
         t = (steps - step - 1) / steps
         t_idx = int(t * 1000)
         t_tensor = torch.full((latents.shape[0],), t_idx, device=device, dtype=torch.long)
-        context = torch.randn(latents.shape[0], 256, 4096, dtype=torch.float16, device=device)
+        context = torch.randn(latents.shape[0], 256, 4096, dtype=torch.bfloat16, device=device)
         model_output = dit(latents, t_tensor, context)
         if isinstance(model_output, (tuple, list)):
             model_output = model_output[0]
