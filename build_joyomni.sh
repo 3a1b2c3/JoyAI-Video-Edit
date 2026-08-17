@@ -13,61 +13,43 @@ echo "WSL Build: joyomni_ops"
 echo "=========================================="
 echo ""
 
-# Create/activate venv (use explicit Linux Python)
+# Create/activate venv
 cd "$PROJ"
 echo "Working directory: $(pwd)"
 echo ""
 
-# Ensure we're using Linux Python in WSL, not Windows Python
-LINUX_PYTHON="/usr/bin/python3"
-if [ ! -f "$LINUX_PYTHON" ]; then
-    LINUX_PYTHON=$(which python3)
-    if [ -z "$LINUX_PYTHON" ]; then
-        echo "ERROR: Python3 not found in WSL"
-        exit 1
-    fi
-fi
-echo "Using Python: $LINUX_PYTHON"
-echo ""
-
-# Remove old Windows-style venv if it exists
-if [ -d ".venv/Lib" ] && [ ! -d ".venv/lib" ]; then
-    echo "Removing Windows venv structure..."
+# Remove old venv if corrupted
+if [ -d ".venv/Lib" ]; then
+    echo "[0/5] Cleaning corrupted venv..."
     rm -rf .venv
 fi
 
+# Create fresh venv
 if [ ! -d ".venv" ]; then
     echo "[1/5] Creating venv..."
-    if ! $LINUX_PYTHON -m venv .venv; then
-        echo "ERROR: Failed to create venv"
+    python3 -m venv .venv || {
+        echo "ERROR: venv creation failed"
         exit 1
-    fi
-    echo "OK"
+    }
 fi
 
-if [ ! -f ".venv/bin/activate" ]; then
-    echo "ERROR: venv structure incorrect"
-    echo "Contents of .venv:"
-    ls -la .venv/ || true
-    echo "Contents of .venv/bin:"
-    ls -la .venv/bin/ || true
-    exit 1
-fi
-
-echo "[1/5] Activating venv..."
-source .venv/bin/activate
-echo "OK (Python: $(python --version))"
+echo "[1/5] Setting up venv paths..."
+export VIRTUAL_ENV="$PROJ/.venv"
+export PATH="$VIRTUAL_ENV/bin:$PATH"
+export PYTHONPATH="$VIRTUAL_ENV/lib/python3.12/site-packages:${PYTHONPATH:-}"
+echo "OK"
 
 echo "[1b/5] Installing packages..."
-pip install --upgrade pip setuptools wheel >/dev/null 2>&1
-pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu124 >/dev/null 2>&1
-pip install -r deploy/requirements.txt >/dev/null 2>&1
+$VIRTUAL_ENV/bin/python -m pip install --upgrade pip setuptools wheel 2>&1 | tail -1
+echo "  Installing torch 2.4.0+cu124..."
+$VIRTUAL_ENV/bin/python -m pip install torch==2.4.0 torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu124 2>&1 | tail -3
+$VIRTUAL_ENV/bin/python -m pip install -r deploy/requirements.txt 2>&1 | tail -1
 echo "OK"
 
 echo ""
 echo "[2/5] Verifying environment..."
-python --version
-pip --version
+$VIRTUAL_ENV/bin/python --version
+$VIRTUAL_ENV/bin/pip --version
 echo "OK"
 
 echo ""
@@ -79,7 +61,7 @@ echo "OK"
 echo ""
 echo "[4/5] Building joyomni_ops..."
 export JOYOMNI_OPS_NO_FP8=1
-python setup.py build_ext --inplace
+$VIRTUAL_ENV/bin/python setup.py build_ext --inplace
 
 echo ""
 echo "[5/5] Verifying build..."

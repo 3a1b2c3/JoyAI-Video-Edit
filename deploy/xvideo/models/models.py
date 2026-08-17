@@ -68,7 +68,11 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     state_dict = None
     if cfg.dit_ckpt is not None:
         logger.info(f"Loading DiT checkpoint: {cfg.dit_ckpt}")
-        state_dict = torch.load(cfg.dit_ckpt, map_location="cpu", weights_only=True)
+        # mmap=True memory-maps the (32+ GB) checkpoint instead of reading it all into
+        # CPU RAM, which OOM-kills (SIGKILL) on shared boxes. mmap requires
+        # map_location='cpu'; load_state_dict below copies the mapped tensors straight
+        # into the GPU model, so peak CPU RAM stays tiny.
+        state_dict = torch.load(cfg.dit_ckpt, map_location="cpu", weights_only=True, mmap=True)
         if "model" in state_dict:
             state_dict = state_dict["model"]
 
