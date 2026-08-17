@@ -72,12 +72,15 @@ class SessionGate:
             ev.set()
 
 
+WS_SEND_TIMEOUT_S = 10.0
+
 REF_IMAGE_DIR = REPO_ROOT / "rv2v_reference"
 REF_IMAGE_FILES = {
     "hat": "4e481f7a-2443-4935-a841-af6113cc4236.png",
     "scarf": "5e178546-3ebf-40df-bb86-01613dd96c3b.png",
     "pink_tee": "1c182f2f-32cf-4825-904e-64c69aed2e31.png",
     "orange_glasses": "486b9561-e73d-45ca-bb2d-2a47998a0a73.png",
+    "nailong": "nailong.png",
 }
 
 def _load_ref_images() -> dict[str, str]:
@@ -125,6 +128,7 @@ def _snap_to_align(value: int, align: int) -> int:
 
 class _H264Stream:
     def __init__(self, quality: int) -> None:
+        self._lock = threading.Lock()
         self._enc = None
         self._size: tuple[int, int] | None = None
         self._crf = self.crf_for_quality(quality)
@@ -142,6 +146,10 @@ class _H264Stream:
         self._want_reset = True
 
     def encode(self, frames: list) -> list[tuple[bytes, bool]]:
+        with self._lock:
+            return self._encode_locked(frames)
+
+    def _encode_locked(self, frames: list) -> list[tuple[bytes, bool]]:
         import av
         import cv2
 
@@ -823,10 +831,22 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             "send_state": "idle",
         }
 
+        async def _ws_send_json(payload: dict[str, Any]) -> None:
+            try:
+                await asyncio.wait_for(websocket.send_json(payload), timeout=WS_SEND_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                raise WebSocketDisconnect()
+
+        async def _ws_send_bytes(data: bytes) -> None:
+            try:
+                await asyncio.wait_for(websocket.send_bytes(data), timeout=WS_SEND_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                raise WebSocketDisconnect()
+
         async def _send_json(payload: dict[str, Any]) -> None:
             async with send_lock:
                 ws_debug["send_state"] = f"json:{payload.get('type')}"
-                await websocket.send_json(payload)
+                await _ws_send_json(payload)
                 ws_debug["last_send_at"] = time.time()
                 ws_debug["send_state"] = "idle"
 
@@ -907,7 +927,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                             ws_debug["rec_out_written"] = _rec_o.frames_written
                             ws_debug["rec_out_dropped"] = _rec_o.frames_dropped_recording
                     async with send_lock:
-                        await websocket.send_json({
+                        await _ws_send_json({
                             "type": "flow_drop",
                             "count": count,
                             "outstanding": _outstanding,
@@ -938,7 +958,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
             async with send_lock:
                 ws_debug["send_state"] = f"chunk_start:{profile.get('chunk_idx')}"
-                await websocket.send_json(
+                await _ws_send_json(
                     {
                         "type": "chunk_start",
                         "count": count,
@@ -968,7 +988,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                     wire, is_key = encoded, False
                 async with send_lock:
                     ws_debug["send_state"] = f"chunk_frame:{profile.get('chunk_idx')}:{idx}"
-                    await websocket.send_json(
+                    await _ws_send_json(
                         {
                             "type": "output_frame",
                             "index": idx,
@@ -981,7 +1001,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                             "key": is_key,
                         }
                     )
-                    await websocket.send_bytes(wire)
+                    await _ws_send_bytes(wire)
                     frames_out += 1
                     ws_debug["frames_out"] = frames_out
                     ws_debug["output_bytes"] = int(ws_debug.get("output_bytes", 0)) + len(wire)
@@ -1022,7 +1042,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 _chunk_done_msg["chunk_idx"] = profile.get("chunk_idx")
             async with send_lock:
                 ws_debug["send_state"] = f"chunk_done:{profile.get('chunk_idx')}"
-                await websocket.send_json(_chunk_done_msg)
+                await _ws_send_json(_chunk_done_msg)
                 ws_debug["chunk_results_sent"] = int(ws_debug.get("chunk_results_sent", 0)) + 1
                 ws_debug["last_send_at"] = time.time()
                 ws_debug["send_state"] = "idle"
@@ -1129,7 +1149,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             return None
 
         def _close_session_sync(session_ref) -> None:
-            session_ref.close()
+            with app.state.inference_lock:
+                session_ref.close()
 
         async def _close_session_safely(session_ref, reason: str) -> None:
             try:
@@ -1239,6 +1260,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             nonlocal session, frames_since_session_reset, reset_count
             if session is None:
                 return
+            print(f"#####[STREAM] session reset ({reason})", flush=True)
 
             await _stop_output_task()
             await _close_session_safely(session, "kv_reset")
@@ -1281,7 +1303,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             last_activity = time.monotonic()
             last_frames_out = frames_out
             while True:
-                if frames_out != last_frames_out:
+                if frames_out != last_frames_out or pe_task is not None:
                     last_frames_out = frames_out
                     last_activity = time.monotonic()
                 if time.monotonic() - last_activity >= HOLDER_IDLE_TIMEOUT_S:
@@ -1356,7 +1378,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         ))
                         use_pe = bool(payload.get("use_pe", args.use_pe)) and bool(os.environ.get("OPENAI_API_KEY"))
 
-                        face_gate_pending = bool(payload.get("gate_enabled", True))
+                        entry_gate = bool(payload.get("gate_enabled", True))
+                        face_gate_pending = entry_gate
                         flow["recv"] = None
                         flow["at"] = 0.0
                         flow["congested"] = False
@@ -1365,7 +1388,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         flow["consec"] = 0
                         flow["base"] = frames_out
 
-                        gate_on = bool(args.online_gate) and bool(payload.get("gate_enabled", True))
+                        gate_on = bool(args.online_gate) and entry_gate
 
                         fg_score = float(payload.get("fg_score", args.face_gate_score))
                         fg_min_below = float(payload.get("fg_min_below_ratio", args.face_gate_min_below_ratio))
@@ -1622,7 +1645,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         continue
 
                 if kv_reset_frames > 0 and frames_since_session_reset >= kv_reset_frames:
-                    face_gate_pending = True
+                    face_gate_pending = entry_gate
                     gate_state["count"] = 0
                     gate_state["cx"] = None
                     gate_state["cy"] = None
