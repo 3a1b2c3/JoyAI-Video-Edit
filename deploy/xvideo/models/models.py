@@ -92,9 +92,11 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
 
         load_state_dict = {}
         for k, v in state_dict.items():
-            # Convert tensor to model's dtype/device immediately to avoid OOM from temp copies
+            # Convert tensor to model's dtype/device immediately to avoid OOM from temp copies.
+            # BLOCKING copy (no non_blocking): the source tensors are mmap'd (not pinned),
+            # so an async H2D transfer races -> "CUDA driver error: device not ready".
             if isinstance(v, torch.Tensor):
-                v = v.to(device=device, dtype=dtype, non_blocking=True)
+                v = v.to(device=device, dtype=dtype)
 
             if (
                 k == "img_in.weight" and
