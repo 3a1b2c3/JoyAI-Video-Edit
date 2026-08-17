@@ -76,10 +76,10 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
         if "model" in state_dict:
             state_dict = state_dict["model"]
 
-    # Load model in fp32 to avoid dtype mismatch during initialization,
-    # then convert to target dtype after all internal tensors are created
+    dtype = PRECISION_TO_TYPE[cfg.dit_precision]
+    # Load on CPU to avoid GPU OOM, move to GPU only for compute
     model = Transformer3DModel(
-        dtype=torch.float32, device=device, **_arch_params(cfg.dit_arch_config)
+        dtype=dtype, device=torch.device("cpu"), **_arch_params(cfg.dit_arch_config)
     )
 
     if state_dict is not None:
@@ -92,10 +92,10 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
 
         load_state_dict = {}
         for k, v in state_dict.items():
-            # Keep checkpoint tensors on CPU (mmap'd). PyTorch will transfer to GPU
-            # during load_state_dict. Converting dtype here is OK (CPU is fast).
+            # Keep checkpoint tensors on CPU (mmap'd). Convert to target dtype on CPU (fast).
+            # PyTorch will transfer to GPU during load_state_dict.
             if isinstance(v, torch.Tensor):
-                v = v.to(dtype=torch.float32)
+                v = v.to(dtype=dtype)
 
             if (
                 k == "img_in.weight" and
@@ -122,9 +122,9 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
 
-    # Move to device and convert to target dtype (bf16 for joyomni_ops, fp16 otherwise)
-    target_dtype = PRECISION_TO_TYPE[cfg.dit_precision]
-    model = model.to(device=device, dtype=target_dtype)
+    # Keep model on CPU (offload mode to avoid GPU OOM on shared systems)
+    # Forward pass will move to GPU for compute, then back to CPU
+    logger.info("Model offload mode: CPU storage, GPU compute on-demand")
 
     return model.eval()
 

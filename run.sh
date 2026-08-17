@@ -303,6 +303,10 @@ steps = int(sys.argv[7]) if len(sys.argv) > 7 else 1
 print(f"[4/5] Diffusion ({steps} steps)...")
 mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
+
+# Move model to GPU for diffusion (CPU offload mode)
+dit.to(device)
+
 with torch.no_grad():
     for step in tqdm(range(steps), desc="Denoising"):
         t = (steps - step - 1) / steps
@@ -315,6 +319,11 @@ with torch.no_grad():
         sigma = np.sqrt(t / (1 - t)) if t > 0 else 0
         latents = latents + model_output * (-sigma * 0.1)
         torch.cuda.empty_cache()
+
+# Move model back to CPU to free GPU
+dit.to("cpu")
+gc.collect()
+torch.cuda.empty_cache()
 gc.collect()
 torch.cuda.empty_cache()
 mem_after_diffusion = torch.cuda.memory_allocated() / 1e9
