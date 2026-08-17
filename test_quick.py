@@ -22,7 +22,7 @@ print("[1/2] Loading DiT...")
 cfg = ExpConfig()
 cfg.training_mode = False
 cfg.dit_precision = "bf16"
-cfg.dit_ckpt = str(Path("deploy/deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth"))
+cfg.dit_ckpt = str(Path("dit_quantized.pth"))  # Use quantized checkpoint
 dit = load_dit(cfg, device=device)
 dit.eval()
 print(f"  ✓ DiT loaded ({torch.cuda.memory_allocated() / 1e9:.1f}GB)")
