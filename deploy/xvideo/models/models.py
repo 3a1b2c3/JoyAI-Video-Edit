@@ -113,6 +113,13 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
         if unexpected_keys:
             logger.warning(f"Unexpected keys when loading DiT: {unexpected_keys[:20]}")
 
+        # Free checkpoint memory before moving model to device
+        del load_state_dict
+        del state_dict
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
 
@@ -120,6 +127,9 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     if len(param_dtypes) > 1:
         logger.warning(f"Model has mixed dtypes: {param_dtypes}. Converting to {dtype}")
         model = model.to(dtype)
+
+    # Move model to device (checkpoint freed above)
+    model = model.to(device)
 
     return model.eval()
 
