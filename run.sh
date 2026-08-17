@@ -1,9 +1,7 @@
 #!/bin/bash
 # Run DiT inference on horde with joyomni_ops
 
-set -euo pipefail  # fail on error, undefined vars, pipe failures
-
-trap 'echo "ERROR on line $LINENO"; exit 1' ERR
+set -u  # fail on undefined vars (but not on errors or pipe failures)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -52,9 +50,12 @@ HEIGHT="${5:-256}"
 WIDTH="${6:-256}"
 STEPS="${7:-1}"
 
+# Resolve full output path upfront
+OUTPUT_FULL=$(cd "$(dirname "$SCRIPT_DIR/$OUTPUT")" 2>/dev/null && pwd -P)/$(basename "$OUTPUT") || echo "$SCRIPT_DIR/$OUTPUT"
+
 echo "Configuration:"
 echo "  Video:      $VIDEO"
-echo "  Output:     $OUTPUT"
+echo "  Output:     $OUTPUT_FULL"
 echo "  Style:      $REF_IMAGE"
 echo "  Frames:     $FRAMES"
 echo "  Resolution: ${HEIGHT}x${WIDTH}"
@@ -223,11 +224,11 @@ torch.cuda.empty_cache()
 mem_after_cleanup = torch.cuda.memory_allocated() / 1e9
 print(f"  ✓ DiT loaded (final: {mem_after_cleanup:.1f}GB)")
 
-# Load VAE + text encoder on CPU (DiT uses all GPU memory)
-print("  Loading VAE (float16, CPU)...")
+# Load VAE on GPU (quantized DiT 16GB + VAE ~3GB fits in 48GB)
+print("  Loading VAE (float16, GPU)...")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
 vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
-vae = vae.to("cpu")
+vae = vae.to("cuda")
 vae.eval()
 vae.requires_grad_(False)
 print(f"  ✓ VAE loaded (float16, CPU)")
@@ -240,7 +241,7 @@ try:
         from xvideo.models.models import load_text_encoder
         tokenizer, text_encoder = load_text_encoder(
             str(text_encoder_ckpt),
-            device=torch.device("cpu"),
+            device=torch.device("cuda"),
             torch_dtype=torch.float16
         )
         text_encoder.eval()
@@ -250,7 +251,7 @@ except Exception as e:
     text_encoder = None
     tokenizer = None
 
-print(f"  Note: VAE/text encode/decode run on CPU (slower but fits GPU)")
+print(f"  Note: All models on GPU (DiT 16GB + VAE 3GB + encoder 2GB = 21GB / 48GB)")
 
 # Clear memory and summary
 gc.collect()
@@ -271,8 +272,7 @@ mem_before_encode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
 with torch.no_grad():
     frames_chw = frames_tensor.permute(0, 3, 1, 2)
-    # Move to CPU for VAE encoding (VAE is on CPU)
-    frames_chw = frames_chw.to("cpu")
+    # Keep frames on GPU (VAE is on GPU now, much faster)
     latents_list = []
     for i in tqdm(range(len(frames_chw)), desc="Encoding"):
         try:
@@ -295,8 +295,7 @@ with torch.no_grad():
     else:
         print("  WARNING: latents_list empty, using raw frames")
         latents = frames_chw[:1]
-    # Move latents back to GPU for diffusion
-    latents = latents.to("cuda")
+    # Latents already on GPU (VAE on GPU)
     print(f"  Final latents shape: {latents.shape}")
     gc.collect()
     torch.cuda.empty_cache()
@@ -370,11 +369,12 @@ if decoded.ndim == 5:
     decoded = decoded.squeeze(2)
 output_frames = (decoded.to(torch.float32).permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
 iio.imwrite(output_path, output_frames, fps=fps)
-print(f"\n✓ Saved: {output_path}")
+print(f"\n✓ Output saved:")
+print(f"  {output_path}")
 print("=" * 70)
 print("✅ INFERENCE COMPLETE")
 print("=" * 70)
-
+print(f"Full path: {output_path}")
 PYEOF
 
 PYEOF_EXIT=$?
