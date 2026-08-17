@@ -62,12 +62,28 @@ if [ -n "$REF_IMAGE" ] && [ "$REF_IMAGE" != "" ]; then
     fi
 fi
 
-# Verify joyomni_ops
+# Verify joyomni_ops (fail hard if missing)
 echo "Checking joyomni_ops..."
-$PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" || {
-    echo "❌ joyomni_ops not found"
+if ! $PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" 2>&1; then
+    echo ""
+    echo "=========================================="
+    echo "❌ FATAL: joyomni_ops not found"
+    echo "=========================================="
+    echo ""
+    echo "joyomni_ops._C.cpython-310-x86_64.pyd must be built first."
+    echo ""
+    echo "Build location: deploy/joyomni_ops/"
+    echo ""
+    echo "Check if .pyd exists:"
+    echo "  ls -la deploy/joyomni_ops/joyomni_ops/_C*.pyd"
+    echo ""
+    echo "If missing, rebuild:"
+    echo "  cd deploy/joyomni_ops"
+    echo "  set JOYOMNI_OPS_NO_FP8=1"
+    echo "  python setup.py build_ext --inplace"
+    echo ""
     exit 1
-}
+fi
 echo ""
 
 # Create output directory
