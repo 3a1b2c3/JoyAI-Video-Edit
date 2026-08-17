@@ -45,6 +45,23 @@ echo "  Resolution: ${HEIGHT}x${WIDTH}"
 echo "  Steps:      $STEPS"
 echo ""
 
+# Verify input video exists
+if [ ! -f "$VIDEO" ]; then
+    echo "❌ ERROR: Input video not found: $VIDEO"
+    exit 1
+fi
+echo "✓ Input video found"
+
+# Verify style image if specified
+if [ -n "$REF_IMAGE" ] && [ "$REF_IMAGE" != "" ]; then
+    if [ ! -f "$REF_IMAGE" ]; then
+        echo "⚠ WARNING: Style image not found: $REF_IMAGE (proceeding without style)"
+        REF_IMAGE=""
+    else
+        echo "✓ Style image found"
+    fi
+fi
+
 # Verify joyomni_ops
 echo "Checking joyomni_ops..."
 $PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" || {
@@ -54,7 +71,14 @@ $PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_o
 echo ""
 
 # Create output directory
-mkdir -p outputs
+OUTPUT_DIR=$(dirname "$OUTPUT")
+mkdir -p "$OUTPUT_DIR"
+if [ ! -d "$OUTPUT_DIR" ]; then
+    echo "❌ ERROR: Cannot create output directory: $OUTPUT_DIR"
+    exit 1
+fi
+echo "✓ Output directory ready: $OUTPUT_DIR"
+echo ""
 
 # Run inference
 echo "Running inference..."
@@ -66,6 +90,7 @@ echo ""
 # Load models and run diffusion
 $PYTHON << 'PYEOF'
 import sys
+import gc
 import torch
 import cv2
 import numpy as np
@@ -126,24 +151,41 @@ frames_tensor = torch.stack(frames).to(device, dtype=torch.float16)
 print(f"✓ Loaded {len(frames)} frames @ {fps:.1f} fps")
 print()
 
-# Load models
-print("[2/5] Loading models (float16)...")
+# Load models with memory optimization
+print("[2/5] Loading models (float16, memory-efficient)...")
+import gc
+
 cfg = ExpConfig()
 cfg.training_mode = False
+cfg.dit_precision = "fp16"  # Set precision before loading
 cfg.dit_ckpt = str(Path("deploy/deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth"))
 
+# Load DiT directly to GPU in float16
+print("  Loading DiT (direct to GPU, float16)...")
 dit = load_dit(cfg, device=device)
 dit = dit.to(device, dtype=torch.float16)
+
+# Ensure all buffers are float16
+for buffer in dit.buffers():
+    buffer.data = buffer.data.to(dtype=torch.float16)
+
 dit.eval()
 dit.requires_grad_(False)
-print(f"✓ DiT loaded")
+print(f"  ✓ DiT loaded (float16)")
 
+# Load VAE
+print("  Loading VAE (float16)...")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
 vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
 vae = vae.to(device)
 vae.eval()
 vae.requires_grad_(False)
-print(f"✓ VAE loaded")
+print(f"  ✓ VAE loaded (float16)")
+
+# Clear memory
+gc.collect()
+torch.cuda.empty_cache()
+print(f"  Memory after loading: {torch.cuda.memory_allocated() / 1e9:.1f}GB / {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
 print()
 
 # Encode
@@ -161,7 +203,10 @@ with torch.no_grad():
             print(f"Frame {i}: {e}")
             continue
     latents = torch.cat(latents_list, dim=0) if latents_list else frames_chw[:1]
+    gc.collect()
+    torch.cuda.empty_cache()
     print(f"✓ Encoded to {latents.shape}")
+    print(f"  Memory: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
 print()
 
 # Diffusion
@@ -179,7 +224,9 @@ with torch.no_grad():
         sigma = np.sqrt(t / (1 - t)) if t > 0 else 0
         latents = latents + model_output * (-sigma * 0.1)
         torch.cuda.empty_cache()
-print("✓ Diffusion complete")
+gc.collect()
+torch.cuda.empty_cache()
+print(f"✓ Diffusion complete (Memory: {torch.cuda.memory_allocated() / 1e9:.1f}GB)")
 print()
 
 # Decode
@@ -196,7 +243,10 @@ with torch.no_grad():
             print(f"Frame {i}: {e}")
             continue
     decoded = torch.cat(frames_decoded, dim=0) if frames_decoded else latents_decoded[:1]
+    gc.collect()
+    torch.cuda.empty_cache()
     print(f"✓ Decoded {len(decoded)} frames")
+    print(f"  Memory: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
 
 # Save
 output_path = sys.argv[2] if len(sys.argv) > 2 else "outputs/dit_output.mp4"

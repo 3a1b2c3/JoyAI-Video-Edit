@@ -1,6 +1,7 @@
 --extra-index-url https://download.pytorch.org/whl/cu130
-torch==2.9.1+cu130
-torchvision==0.24.1+cu130
+torch==2.9.1
+torchvision==0.24.1
+torchaudio==2.9.1
 transformers>=4.57.1,<4.58
 accelerate==1.10.1
 diffusers==0.36.0
