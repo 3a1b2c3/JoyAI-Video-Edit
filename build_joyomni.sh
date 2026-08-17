@@ -13,21 +13,56 @@ echo "WSL Build: joyomni_ops"
 echo "=========================================="
 echo ""
 
-# Create venv if needed
-if [ ! -d "$PROJ/.venv" ]; then
+# Create/activate venv (use explicit Linux Python)
+cd "$PROJ"
+echo "Working directory: $(pwd)"
+echo ""
+
+# Ensure we're using Linux Python in WSL, not Windows Python
+LINUX_PYTHON="/usr/bin/python3"
+if [ ! -f "$LINUX_PYTHON" ]; then
+    LINUX_PYTHON=$(which python3)
+    if [ -z "$LINUX_PYTHON" ]; then
+        echo "ERROR: Python3 not found in WSL"
+        exit 1
+    fi
+fi
+echo "Using Python: $LINUX_PYTHON"
+echo ""
+
+# Remove old Windows-style venv if it exists
+if [ -d ".venv/Lib" ] && [ ! -d ".venv/lib" ]; then
+    echo "Removing Windows venv structure..."
+    rm -rf .venv
+fi
+
+if [ ! -d ".venv" ]; then
     echo "[1/5] Creating venv..."
-    cd "$PROJ"
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install --upgrade pip setuptools wheel
-    pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu124
-    pip install -r deploy/requirements.txt
-    echo "OK"
-else
-    echo "[1/5] Activating venv..."
-    source "$PROJ/.venv/bin/activate"
+    if ! $LINUX_PYTHON -m venv .venv; then
+        echo "ERROR: Failed to create venv"
+        exit 1
+    fi
     echo "OK"
 fi
+
+if [ ! -f ".venv/bin/activate" ]; then
+    echo "ERROR: venv structure incorrect"
+    echo "Contents of .venv:"
+    ls -la .venv/ || true
+    echo "Contents of .venv/bin:"
+    ls -la .venv/bin/ || true
+    exit 1
+fi
+
+echo "[1/5] Activating venv..."
+source .venv/bin/activate
+echo "OK (Python: $(python --version))"
+
+echo "[1b/5] Installing packages..."
+pip install --upgrade pip setuptools wheel >/dev/null 2>&1
+pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cu124 >/dev/null 2>&1
+pip install -r deploy/requirements.txt >/dev/null 2>&1
+echo "OK"
 
 echo ""
 echo "[2/5] Verifying environment..."
