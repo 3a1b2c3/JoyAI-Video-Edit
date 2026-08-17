@@ -1662,18 +1662,13 @@ async function beginSession() {
     seed: SERVER_DEFAULTS.seed,
     kv_reset_frames: Math.max(0, Math.floor(Number(document.getElementById("kvResetFrames").value) || 0)),
     output_quality: Number(downQualityUi.value),
+    fps: sendTargetFps(),
     output_codec: h264DecodeOk ? "h264" : "mjpeg",
-    input_codec: upCodecH264 ? "h264" : "mjpeg",
-    no_person_blank: faceGateDebugEnabled(),
-    require_face: faceGateDebugEnabled(),
-    person_count_reedit: faceGateDebugEnabled()
+    input_codec: upCodecH264 ? "h264" : "mjpeg"
   };
   if (usingVideoFile) {
     startPayload.source = "file";
     startPayload.gate_enabled = false;
-    startPayload.no_person_blank = false;
-    startPayload.require_face = false;
-    startPayload.person_count_reedit = false;
   }
   if (cachedEnhancedPrompt) startPayload.enhanced_prompt = cachedEnhancedPrompt;
   if (refImage) startPayload.ref_image = refImage;
