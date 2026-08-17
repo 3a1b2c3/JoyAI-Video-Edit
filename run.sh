@@ -33,6 +33,9 @@ export TORCH_HOME="$SCRIPT_DIR/.cache/torch"
 export HF_HOME="$SCRIPT_DIR/.cache/huggingface"
 mkdir -p "$TORCH_HOME" "$HF_HOME"
 
+# Fix GPU memory fragmentation on 48GB systems near capacity
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 echo "Environment:"
 echo "  PYTHONPATH: $PYTHONPATH"
 echo "  LD_LIBRARY_PATH: $CUDA_LIB:$TORCH_LIB"
