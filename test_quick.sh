@@ -52,10 +52,18 @@ print("[2/4] Loading VAE (GPU)...")
 mem_info("Before VAE load")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
 mem_info("After VAE path")
-vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
+vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.bfloat16)
 mem_info("After from_pretrained")
 vae = vae.to("cuda")
 mem_info("After vae.to(cuda)")
+# Force all VAE parameters/buffers to bf16 (fixes bias dtype mismatches)
+for param in vae.parameters():
+    if param.dtype != torch.bfloat16:
+        param.data = param.data.to(torch.bfloat16)
+for buf in vae.buffers():
+    if buf.dtype not in (torch.long, torch.int, torch.bool):
+        if buf.dtype != torch.bfloat16:
+            buf.data = buf.data.to(torch.bfloat16)
 vae.eval()
 mem_info("After VAE eval")
 print()

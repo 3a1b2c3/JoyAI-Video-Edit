@@ -41,14 +41,24 @@ dit.eval()
 show_mem("After dit.eval()")
 print()
 
-# Load VAE
-print("[2/4] Loading VAE (CPU)...")
+# Load VAE with bf16 dtype
+print("[2/4] Loading VAE (bf16)...")
 show_mem("Before VAE load")
-vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
-vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
-vae = vae.to("cpu")
+vae = XVAEChunkCausal.from_pretrained(
+    str(Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")),
+    torch_dtype=torch.bfloat16
+)
+vae = vae.to(device)
+# Force all VAE parameters/buffers to bf16 (fixes bias dtype mismatches)
+for param in vae.parameters():
+    if param.dtype != torch.bfloat16:
+        param.data = param.data.to(torch.bfloat16)
+for buf in vae.buffers():
+    if buf.dtype not in (torch.long, torch.int, torch.bool):
+        if buf.dtype != torch.bfloat16:
+            buf.data = buf.data.to(torch.bfloat16)
 vae.eval()
-show_mem("After VAE load (on CPU)")
+show_mem("After VAE load")
 print()
 
 # Synthetic latents (skip 18min VAE encode)

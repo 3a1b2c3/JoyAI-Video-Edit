@@ -243,14 +243,22 @@ torch.cuda.empty_cache()
 mem_after_cleanup = torch.cuda.memory_allocated() / 1e9
 print(f"  ✓ DiT loaded (final: {mem_after_cleanup:.1f}GB)")
 
-# Load VAE on CPU (free GPU memory during DiT loading)
-print("  Loading VAE (float16, CPU)...")
+# Load VAE in bf16 (matches DiT dtype)
+print("  Loading VAE (bf16, CPU)...")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
-vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
+vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.bfloat16)
 vae = vae.to("cpu")
+# Force all VAE parameters/buffers to bf16 (fixes bias dtype mismatches)
+for param in vae.parameters():
+    if param.dtype != torch.bfloat16:
+        param.data = param.data.to(torch.bfloat16)
+for buf in vae.buffers():
+    if buf.dtype not in (torch.long, torch.int, torch.bool):
+        if buf.dtype != torch.bfloat16:
+            buf.data = buf.data.to(torch.bfloat16)
 vae.eval()
 vae.requires_grad_(False)
-print(f"  ✓ VAE loaded (float16, CPU)")
+print(f"  ✓ VAE loaded (bf16, CPU)")
 mem_info("After VAE load")
 
 # Load text encoder on GPU if available
