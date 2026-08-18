@@ -122,8 +122,18 @@ echo "  Resolution: ${HEIGHT}x${WIDTH}"
 echo "  Steps: $STEPS"
 echo ""
 
+# Export args as env vars for Python
+export JOYAI_VIDEO="$VIDEO"
+export JOYAI_OUTPUT="$OUTPUT"
+export JOYAI_REF_IMAGE="$REF_IMAGE"
+export JOYAI_FRAMES="$FRAMES"
+export JOYAI_HEIGHT="$HEIGHT"
+export JOYAI_WIDTH="$WIDTH"
+export JOYAI_STEPS="$STEPS"
+
 # Load models and run diffusion
 $PYTHON -u << 'PYEOF'
+import os
 import sys
 import gc
 import torch
@@ -171,8 +181,8 @@ print()
 seed_everything(42)
 
 # Load video
-video_path = sys.argv[1] if len(sys.argv) > 1 else "assets/Recording 2026-08-12 205529.mp4"
-frames_arg = sys.argv[4] if len(sys.argv) > 4 else "all"
+video_path = os.environ.get("JOYAI_VIDEO", "assets/Recording 2026-08-12 205529.mp4")
+frames_arg = os.environ.get("JOYAI_FRAMES", "10")
 # H/W: explicit digits are used (letterboxed to that box); otherwise AUTO -> match
 # the video's aspect ratio (longest side = BASE, snapped to a multiple of 16 for the VAE).
 _h_arg = sys.argv[5] if len(sys.argv) > 5 else ""
