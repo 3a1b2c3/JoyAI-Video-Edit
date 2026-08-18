@@ -331,11 +331,6 @@ print()
 
 # Encode
 print("[3/5] VAE encoding...")
-# Move DiT to CPU to free GPU memory for VAE encoding
-print("  Moving DiT to CPU...")
-dit = dit.to("cpu")
-gc.collect()
-torch.cuda.empty_cache()
 mem_before_encode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
 with torch.no_grad():
