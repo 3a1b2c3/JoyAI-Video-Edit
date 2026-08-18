@@ -113,11 +113,14 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
                 v = v["data"].float() * v["scale"]
             elif not isinstance(v, torch.Tensor):
                 continue
-            v = v.to(device=device, dtype=target.dtype)  # move ONE tensor to GPU
+            v = v.to(device=device, dtype=dtype)  # move ONE tensor to target dtype/device
             if k == "img_in.weight" and target.shape != v.shape:
                 logger.info(f"Inflate {k} from {v.shape} to {target.shape}")
                 v = v.reshape_as(v.new_zeros(target.shape))
             with torch.no_grad():
+                # Ensure target is in correct dtype before copy
+                if target.dtype != dtype:
+                    target.data = target.data.to(dtype=dtype)
                 target.copy_(v)
             del v
             loaded += 1
