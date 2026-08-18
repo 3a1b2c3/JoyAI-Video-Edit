@@ -243,14 +243,15 @@ torch.cuda.empty_cache()
 mem_after_cleanup = torch.cuda.memory_allocated() / 1e9
 print(f"  ✓ DiT loaded (final: {mem_after_cleanup:.1f}GB)")
 
-# Load VAE on GPU (quantized DiT 16GB + VAE ~3GB fits in 48GB)
-print("  Loading VAE (float16, GPU)...")
+# Load VAE on CPU (free GPU memory during DiT loading)
+print("  Loading VAE (float16, CPU)...")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
 vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
-vae = vae.to("cuda")
+vae = vae.to("cpu")
 vae.eval()
 vae.requires_grad_(False)
-print(f"  ✓ VAE loaded (float16, GPU)")
+print(f"  ✓ VAE loaded (float16, CPU)")
+mem_info("After VAE load")
 
 # Load text encoder on GPU if available
 try:
