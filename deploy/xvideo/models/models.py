@@ -77,10 +77,13 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
             state_dict = state_dict["model"]
 
     dtype = PRECISION_TO_TYPE[cfg.dit_precision]
-    # Load on CPU to avoid GPU OOM, move to GPU only for compute
+    # Create the model on CPU first. Streaming the checkpoint below loads tensors
+    # one-by-one directly into the model, keeping peak memory at ~1x model size.
+    # Move to GPU after loading if device != CPU.
     model = Transformer3DModel(
         dtype=dtype, device=torch.device("cpu"), **_arch_params(cfg.dit_arch_config)
     )
+    logger.info(f"Empty model created on CPU: {torch.cuda.memory_allocated()/1e9:.1f}GB GPU allocated")
 
     if state_dict is not None:
         for prefix in ("model.", "module.", "transformer."):
@@ -90,81 +93,49 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
                     for k, v in state_dict.items()
                 }
 
-        logger.info(f"Converting {len(state_dict)} tensors to {dtype}...")
-        load_state_dict = {}
+        # ONE streaming pass: dequantize each checkpoint tensor and copy it straight
+        # into the model's (already GPU-resident) param, then free it. No intermediate
+        # load_state_dict dict -> peak stays ~1x model size instead of 2x (which OOM'd).
+        targets = dict(model.named_parameters())
+        targets.update(dict(model.named_buffers()))
+        n = len(state_dict)
+        logger.info(f"Streaming {n} tensors into the GPU model ({dtype})...")
+        loaded, unexpected = 0, []
         for i, (k, v) in enumerate(state_dict.items()):
-            # Log progress every 100 tensors
-            if i % 100 == 0:
-                mem_alloc = torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0
-                logger.debug(f"  [{i}/{len(state_dict)}] GPU memory: {mem_alloc:.1f}GB")
-
-            # Handle quantized checkpoints (dict with data+scale) and normal tensors
+            target = targets.get(k)
+            if target is None:
+                unexpected.append(k)
+                continue
+            # dequantize int8 {data,scale}, else take the raw tensor
             if isinstance(v, dict) and "data" in v:
-                # Quantized tensor: dequantize
                 v = v["data"].float() * v["scale"]
-                v = v.to(dtype=dtype)
-            elif isinstance(v, torch.Tensor):
-                v = v.to(dtype=dtype)
+            elif not isinstance(v, torch.Tensor):
+                continue
+            v = v.to(device=device, dtype=target.dtype)  # move ONE tensor to GPU
+            if k == "img_in.weight" and target.shape != v.shape:
+                logger.info(f"Inflate {k} from {v.shape} to {target.shape}")
+                v = v.reshape_as(v.new_zeros(target.shape))
+            with torch.no_grad():
+                target.copy_(v)
+            del v
+            loaded += 1
+            if i % 100 == 0:
+                logger.info(f"  [{i}/{n}] streamed | GPU allocated: {torch.cuda.memory_allocated()/1e9:.1f}GB")
 
-            if (
-                isinstance(v, torch.Tensor) and
-                k == "img_in.weight" and
-                hasattr(model, "img_in") and
-                model.img_in.weight.shape != v.shape
-            ):
-                logger.info(f"Inflate {k} from {v.shape} to {model.img_in.weight.shape}")
-                v = v.reshape_as(v.new_zeros(model.img_in.weight.shape))
-            load_state_dict[k] = v
-
-        logger.info(f"Loading state_dict into model (streaming to avoid memory spike)...")
-        # Load tensors one-by-one into model to avoid allocating entire state_dict at once
-        missing_keys = []
-        unexpected_keys = set(model.state_dict().keys())
-
-        for i, (k, v) in enumerate(load_state_dict.items()):
-            try:
-                # Get reference to the actual model parameter/buffer
-                parts = k.split('.')
-                obj = model
-                for part in parts[:-1]:
-                    obj = getattr(obj, part)
-                param = getattr(obj, parts[-1])
-
-                # Copy value directly into model's parameter
-                param.data.copy_(v)
-                unexpected_keys.discard(k)
-
-                if (i + 1) % 100 == 0:
-                    mem_alloc = torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0
-                    logger.debug(f"  Loaded {i+1}/{len(load_state_dict)} tensors. GPU: {mem_alloc:.1f}GB")
-                    # Explicitly free the checkpoint tensor
-                    del v
-                    if i % 500 == 0:
-                        torch.cuda.empty_cache()
-            except (AttributeError, KeyError) as e:
-                logger.debug(f"Could not load {k}: {e}")
-                missing_keys.append(k)
-
-        unexpected_keys = list(unexpected_keys)
-        logger.info(f"State_dict loaded. GPU memory: {torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0:.1f}GB")
-        if missing_keys:
-            logger.warning(f"Missing keys when loading DiT: {missing_keys[:20]}")
-        if unexpected_keys:
-            logger.warning(f"Unexpected keys when loading DiT: {unexpected_keys[:20]}")
-
-        # Free checkpoint memory before moving model to device
-        del load_state_dict
+        missing = [k for k in targets if k not in state_dict]
         del state_dict
         import gc
         gc.collect()
         torch.cuda.empty_cache()
+        logger.info(f"Loaded {loaded}/{n} tensors. GPU allocated: {torch.cuda.memory_allocated()/1e9:.1f}GB")
+        if missing:
+            logger.warning(f"Missing keys when loading DiT: {missing[:20]}")
+        if unexpected:
+            logger.warning(f"Unexpected keys when loading DiT: {unexpected[:20]}")
 
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
-
-    # Keep model on CPU (offload mode to avoid GPU OOM on shared systems)
-    # Forward pass will move to GPU for compute, then back to CPU
-    logger.info("Model offload mode: CPU storage, GPU compute on-demand")
+    logger.info(f"DiT resident fully on {device}: {torch.cuda.memory_allocated()/1e9:.1f}GB allocated")
 
     return model.eval()
 

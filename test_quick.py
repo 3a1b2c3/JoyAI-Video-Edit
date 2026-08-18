@@ -18,38 +18,52 @@ from xvideo.config import ExpConfig
 device = torch.device("cuda")
 print("Quick Test: DiT diffusion (skip 18min VAE encode)")
 print(f"Device: {device}, VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
+
+def show_mem(label):
+    alloc = torch.cuda.memory_allocated() / 1e9
+    reserved = torch.cuda.memory_reserved() / 1e9
+    total = torch.cuda.get_device_properties(0).total_memory / 1e9
+    print(f"[MEM] {label}: alloc={alloc:.1f}GB reserved={reserved:.1f}GB free={total-reserved:.1f}GB")
+
+show_mem("Start")
 print()
 
 # Load DiT
 print("[1/4] Loading DiT...")
+show_mem("Before load_dit")
 cfg = ExpConfig()
 cfg.training_mode = False
 cfg.dit_precision = "bf16"
 cfg.dit_ckpt = str(Path("dit_quantized.pth"))  # Use quantized checkpoint
 dit = load_dit(cfg, device=device)
+show_mem("After load_dit")
 dit.eval()
-print(f"  ✓ DiT loaded ({torch.cuda.memory_allocated() / 1e9:.1f}GB)")
+show_mem("After dit.eval()")
 print()
 
 # Load VAE
-print("[2/4] Loading VAE (GPU)...")
+print("[2/4] Loading VAE (CPU)...")
+show_mem("Before VAE load")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
 vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.float16)
-vae = vae.to("cuda")
+vae = vae.to("cpu")
 vae.eval()
-print(f"  ✓ VAE loaded ({torch.cuda.memory_allocated() / 1e9:.1f}GB)")
+show_mem("After VAE load (on CPU)")
 print()
 
 # Synthetic latents (skip 18min VAE encode)
 print("[3/4] Testing diffusion with synthetic latents...")
+show_mem("Before latents create")
 latents = torch.randn(1, 64, 1, 32, 32, dtype=torch.bfloat16, device=device)
 print(f"  Latents: {latents.shape}")
+show_mem("Before diffusion forward")
 
 with torch.no_grad():
     t = torch.tensor([500], device=device, dtype=torch.long)
     context = torch.randn(1, 256, 4096, dtype=torch.bfloat16, device=device)
     print(f"  Running forward pass...")
     output = dit(latents, t, context)
+    show_mem("After diffusion forward")
     if isinstance(output, tuple):
         output = output[0]
     print(f"  ✓ Diffusion output: {output.shape}")
@@ -57,10 +71,13 @@ print()
 
 # Decode and save
 print("[4/4] Decoding and saving...")
+show_mem("Before decode")
 with torch.no_grad():
     latents_decoded = latents / 0.18215
     try:
+        print(f"  Calling vae.decode()...")
         frame = vae.decode(latents_decoded).sample
+        show_mem("After decode")
         print(f"  Decoded shape: {frame.shape}")
 
         # Save output
