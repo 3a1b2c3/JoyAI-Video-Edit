@@ -271,7 +271,7 @@ except Exception as e:
     text_encoder = None
     tokenizer = None
 
-print(f"  Note: All models on GPU (DiT 16GB + VAE 3GB + encoder 2GB = 21GB / 48GB)")
+print(f"  Note: DiT 16GB on GPU + VAE 3GB on CPU + encoder on GPU (saves GPU during load)")
 
 # Clear memory and summary
 gc.collect()
@@ -292,7 +292,8 @@ mem_before_encode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
 with torch.no_grad():
     frames_chw = frames_tensor.permute(0, 3, 1, 2)
-    # Keep frames on GPU (VAE is on GPU now, much faster)
+    # Move frames to CPU for VAE encoding (VAE is on CPU)
+    frames_chw = frames_chw.to("cpu")
     latents_list = []
     for i in tqdm(range(len(frames_chw)), desc="Encoding"):
         try:
@@ -315,7 +316,8 @@ with torch.no_grad():
     else:
         print("  WARNING: latents_list empty, using raw frames")
         latents = frames_chw[:1]
-    # Latents already on GPU (VAE on GPU)
+    # Move latents to GPU for diffusion
+    latents = latents.to("cuda")
     print(f"  Final latents shape: {latents.shape}")
     gc.collect()
     torch.cuda.empty_cache()
