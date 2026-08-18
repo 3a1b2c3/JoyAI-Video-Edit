@@ -113,7 +113,7 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
                 v = v["data"].float() * v["scale"]
             elif not isinstance(v, torch.Tensor):
                 continue
-            v = v.to(device=device, dtype=dtype)  # move ONE tensor to target dtype/device
+            v = v.to(dtype=dtype)  # convert dtype on CPU first
             if k == "img_in.weight" and target.shape != v.shape:
                 logger.info(f"Inflate {k} from {v.shape} to {target.shape}")
                 v = v.reshape_as(v.new_zeros(target.shape))
@@ -137,6 +137,14 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
             logger.warning(f"Missing keys when loading DiT: {missing[:20]}")
         if unexpected:
             logger.warning(f"Unexpected keys when loading DiT: {unexpected[:20]}")
+
+    # Move model to target device if not CPU
+    if device != torch.device("cpu"):
+        logger.info(f"Moving model to {device}...")
+        if 'cuda' in str(device):
+            model = model.cuda()
+        else:
+            model = model.to(device=device)
 
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
