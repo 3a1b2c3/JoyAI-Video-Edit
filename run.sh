@@ -45,7 +45,7 @@ echo ""
 VIDEO="${1:-assets/cases/omnidream/mattress.mp4}"
 OUTPUT="${2:-$SCRIPT_DIR/outputs/stylized_output.mp4}"
 REF_IMAGE="${3:-assets/image.png}"
-FRAMES="${4:-100}"  # number of frames (100 = ~3.3 sec @ 30fps), "all" = entire video
+FRAMES="${4:-10}"  # number of frames (10 = ~0.3 sec @ 30fps), "all" = entire video
 HEIGHT="${5:-auto}"
 WIDTH="${6:-auto}"
 STEPS="${7:-5}"  # More steps for better quality
