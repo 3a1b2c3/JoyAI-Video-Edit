@@ -78,13 +78,12 @@ with torch.no_grad():
         print(f"  Saving with imageio.v3...")
         iio.imwrite(str(output_path), output_frames, fps=24)
 
-        # Verify file exists
+        # Verify file exists and has content
         import os
-        if os.path.exists(output_path):
-            file_size = os.path.getsize(output_path)
-            print(f"  ✓ Saved: {output_path.resolve()} ({file_size} bytes)")
-        else:
-            print(f"  ❌ File NOT created: {output_path.resolve()}")
+        assert os.path.exists(output_path), f"❌ ASSERT FAILED: File NOT created: {output_path.resolve()}"
+        file_size = os.path.getsize(output_path)
+        assert file_size > 0, f"❌ ASSERT FAILED: File empty (0 bytes): {output_path.resolve()}"
+        print(f"  ✓ Saved: {output_path.resolve()} ({file_size} bytes)")
     except Exception as e:
         print(f"  ❌ Error: {e}")
         import traceback
