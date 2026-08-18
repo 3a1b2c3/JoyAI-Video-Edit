@@ -226,12 +226,13 @@ cfg.dit_ckpt = str(dit_ckpt_path)  # Use quantized (2x smaller) checkpoint
 
 # Load DiT with quantized checkpoint (auto-dequantizes int8 tensors)
 print("  Loading DiT (quantized checkpoint, auto-dequantized to bf16)...")
+mem_before_load = torch.cuda.memory_allocated() / 1e9
 mem_info("Before load_dit()")
 
 dit = load_dit(cfg, device=device)
 mem_info("After load_dit()")
 mem_after_load = torch.cuda.memory_allocated() / 1e9
-print(f"    GPU memory after load: {mem_after_load:.1f}GB (+{mem_after_load - mem_before:.1f}GB)")
+print(f"    GPU memory after load: {mem_after_load:.1f}GB (+{mem_after_load - mem_before_load:.1f}GB)")
 
 # Verify dtype
 model_dtype = next(dit.parameters()).dtype
