@@ -374,14 +374,21 @@ mem_before_decode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before decoding: {mem_before_decode:.1f}GB")
 with torch.no_grad():
     latents_decoded = latents / 0.18215
+    # Move to CPU if VAE is on CPU (device mismatch fix)
+    if str(vae.device) == 'cpu':
+        latents_decoded = latents_decoded.to("cpu")
     frames_decoded = []
     for i in tqdm(range(len(latents_decoded)), desc="Decoding"):
         try:
             frame = vae.decode(latents_decoded[i:i+1]).sample
+            # Ensure output is on GPU if we need it there
+            frame = frame.to(device)
             frames_decoded.append(frame)
             torch.cuda.empty_cache()
         except Exception as e:
             print(f"Frame {i}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
     decoded = torch.cat(frames_decoded, dim=0) if frames_decoded else latents_decoded[:1]
     gc.collect()
@@ -397,9 +404,20 @@ Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
 try:
     import imageio.v3 as iio
+    print(f"  Decoded shape before save: {decoded.shape}, dtype: {decoded.dtype}, device: {decoded.device}")
+
+    # Handle different shape formats
     if decoded.ndim == 5:
-        decoded = decoded.squeeze(2)
-    output_frames = (decoded.to(torch.float32).permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
+        decoded = decoded.squeeze(2)  # (B, C, 1, H, W) -> (B, C, H, W)
+    if decoded.ndim == 4:
+        # (B, C, H, W) -> (B, H, W, C) for video
+        decoded = decoded.permute(0, 2, 3, 1)
+
+    print(f"  Shape after permute: {decoded.shape}")
+
+    # Normalize to uint8
+    output_frames = (decoded.to(torch.float32) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
+    print(f"  Output frames shape: {output_frames.shape}, channels: {output_frames.shape[-1]}")
     print(f"  Saving {len(output_frames)} frames to {output_path}")
     iio.imwrite(output_path, output_frames, fps=fps)
     print(f"\n✓ Output saved:")
