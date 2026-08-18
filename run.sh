@@ -46,8 +46,8 @@ VIDEO="${1:-assets/cases/omnidream/mattress.mp4}"
 OUTPUT="${2:-$SCRIPT_DIR/outputs/stylized_output.mp4}"
 REF_IMAGE="${3:-assets/image.png}"
 FRAMES="${4:-all}"  # "all" = process entire video, or specify number
-HEIGHT="${5:-256}"
-WIDTH="${6:-256}"
+HEIGHT="${5:-auto}"
+WIDTH="${6:-auto}"
 STEPS="${7:-5}"  # More steps for better quality
 
 # Resolve full output path upfront
@@ -173,8 +173,13 @@ seed_everything(42)
 # Load video
 video_path = sys.argv[1] if len(sys.argv) > 1 else "assets/Recording 2026-08-12 205529.mp4"
 frames_arg = sys.argv[4] if len(sys.argv) > 4 else "all"
-height = int(sys.argv[5]) if len(sys.argv) > 5 else 256
-width = int(sys.argv[6]) if len(sys.argv) > 6 else 256
+# H/W: explicit digits are used (letterboxed to that box); otherwise AUTO -> match
+# the video's aspect ratio (longest side = BASE, snapped to a multiple of 16 for the VAE).
+_h_arg = sys.argv[5] if len(sys.argv) > 5 else ""
+_w_arg = sys.argv[6] if len(sys.argv) > 6 else ""
+height = int(_h_arg) if _h_arg.isdigit() else None
+width = int(_w_arg) if _w_arg.isdigit() else None
+BASE = 256
 
 print(f"[1/5] Loading video: {video_path}")
 if not Path(video_path).exists():
@@ -185,24 +190,41 @@ cap = cv2.VideoCapture(video_path)
 fps = cap.get(cv2.CAP_PROP_FPS)
 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 frames_to_load = total_frames if frames_arg == "all" else int(frames_arg)
-frames = []
 
+# Auto-size to the source aspect ratio when H/W aren't given explicitly.
+auto_size = height is None or width is None
+if auto_size:
+    src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 16
+    src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 16
+    ar = src_w / src_h
+    _snap = lambda x: max(16, int(round(x / 16)) * 16)
+    if ar >= 1:   # landscape
+        width, height = BASE, _snap(BASE / ar)
+    else:         # portrait
+        height, width = BASE, _snap(BASE * ar)
+    print(f"  Auto resolution from {src_w}x{src_h} (AR {ar:.3f}) -> {width}x{height}")
+
+frames = []
 for i in range(min(frames_to_load, total_frames)):
     ok, bgr = cap.read()
     if not ok:
         break
-    # Letterbox with aspect ratio preservation
-    orig_h, orig_w = bgr.shape[:2]
-    aspect = orig_w / orig_h
-    if aspect > width / height:
-        new_w, new_h = width, int(width / aspect)
+    if auto_size:
+        # aspect already matched -> plain resize, no letterbox padding
+        bgr_out = cv2.resize(bgr, (width, height))
     else:
-        new_h, new_w = height, int(height * aspect)
-    bgr_resized = cv2.resize(bgr, (new_w, new_h))
-    pad_t, pad_b = (height - new_h) // 2, height - new_h - (height - new_h) // 2
-    pad_l, pad_r = (width - new_w) // 2, width - new_w - (width - new_w) // 2
-    bgr_padded = cv2.copyMakeBorder(bgr_resized, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=(0,0,0))
-    rgb = cv2.cvtColor(bgr_padded, cv2.COLOR_BGR2RGB)
+        # explicit H/W -> letterbox to preserve aspect inside that box
+        orig_h, orig_w = bgr.shape[:2]
+        aspect = orig_w / orig_h
+        if aspect > width / height:
+            new_w, new_h = width, int(width / aspect)
+        else:
+            new_h, new_w = height, int(height * aspect)
+        bgr_resized = cv2.resize(bgr, (new_w, new_h))
+        pad_t, pad_b = (height - new_h) // 2, height - new_h - (height - new_h) // 2
+        pad_l, pad_r = (width - new_w) // 2, width - new_w - (width - new_w) // 2
+        bgr_out = cv2.copyMakeBorder(bgr_resized, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=(0,0,0))
+    rgb = cv2.cvtColor(bgr_out, cv2.COLOR_BGR2RGB)
     frames.append(torch.from_numpy(rgb).float() / 255.0)
 cap.release()
 
@@ -309,19 +331,12 @@ with torch.no_grad():
     for i in tqdm(range(len(frames_chw)), desc="Encoding"):
         try:
             z = frames_chw[i:i+1].unsqueeze(2)
-            print(f"    Frame {i}: input shape {z.shape}, device {z.device}")
             posterior = vae.encode(z).latent_dist
             sample = posterior.sample() * 0.18215
-            print(f"    Frame {i}: latent shape {sample.shape}, channels={sample.shape[1]}, device {sample.device}")
-            if sample.shape[1] != 64:
-                print(f"    ⚠ WARNING: Expected 64 channels, got {sample.shape[1]}")
             latents_list.append(sample)
         except Exception as e:
-            print(f"    Frame {i} ERROR: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"  ⚠ Frame {i} encode error: {e}")
             continue
-    print(f"  latents_list length: {len(latents_list)}")
     if latents_list:
         latents = torch.cat(latents_list, dim=0)
     else:
@@ -329,11 +344,10 @@ with torch.no_grad():
         latents = frames_chw[:1]
     # Move latents to GPU for diffusion
     latents = latents.to("cuda")
-    print(f"  Final latents shape: {latents.shape}")
     gc.collect()
     torch.cuda.empty_cache()
     mem_after_encode = torch.cuda.memory_allocated() / 1e9
-    print(f"✓ Encoded to {latents.shape}")
+    print(f"✓ Encoded {len(latents)} frames")
     print(f"  Memory: {mem_after_encode:.1f}GB ({mem_after_encode - mem_before_encode:+.1f}GB)")
 print()
 
@@ -406,7 +420,6 @@ Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
 try:
     import imageio.v3 as iio
-    print(f"  Decoded shape before save: {decoded.shape}, dtype: {decoded.dtype}, device: {decoded.device}")
 
     # Handle different shape formats
     if decoded.ndim == 5:
@@ -415,12 +428,9 @@ try:
         # (B, C, H, W) -> (B, H, W, C) for video
         decoded = decoded.permute(0, 2, 3, 1)
 
-    print(f"  Shape after permute: {decoded.shape}")
-
     # Normalize to uint8
     output_frames = (decoded.to(torch.float32) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
-    print(f"  Output frames shape: {output_frames.shape}, channels: {output_frames.shape[-1]}")
-    print(f"  Saving {len(output_frames)} frames to {output_path}")
+    print(f"  Saving {len(output_frames)} frames...")
     iio.imwrite(output_path, output_frames, fps=fps)
     print(f"\n✓ Output saved:")
     print(f"  {output_path}")
