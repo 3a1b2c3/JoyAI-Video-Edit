@@ -42,7 +42,11 @@ export JOYOMNI_CUDA_GRAPH="${JOYOMNI_CUDA_GRAPH:-1}"
 export JOYOMNI_SAGE_ATTN="${JOYOMNI_SAGE_ATTN:-1}"
 export JOYOMNI_TXT_PARALLEL="${JOYOMNI_TXT_PARALLEL:-1}"
 
-RECORD_DIR="${JOYOMNI_RECORD_DIR:-$HERE/recordings}"
+RECORD_ARGS=()
+if [ "${JOYOMNI_RECORD_ENABLED:-1}" = "1" ]; then
+  RECORD_DIR="${JOYOMNI_RECORD_DIR:-$HERE/recordings}"
+  RECORD_ARGS=(--record-dir "$RECORD_DIR")
+fi
 
 CKPT_ROOT="${JOYOMNI_CKPT_ROOT:-$HERE/deps/checkpoints}"
 DIT_CKPT="${JOYOMNI_DIT_CKPT:-$CKPT_ROOT/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth}"
@@ -61,7 +65,7 @@ python xvideo/serving/serve_joyomni_streaming.py \
   --text-encoder-ckpt "$TE_CKPT" \
   --face-detector-onnx   "$FACE_ONNX" \
   --person-detector-onnx "$PERSON_ONNX" \
-  --record-dir "$RECORD_DIR" \
+  "${RECORD_ARGS[@]}" \
   --device "$DEVICE" \
   --vae-encode-device "$DEVICE" \
   --vae-decode-device "$DEVICE" \

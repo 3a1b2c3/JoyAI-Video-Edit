@@ -1,0 +1,53 @@
+import json
+import os
+import urllib.error
+import urllib.request
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import Response
+
+
+app = FastAPI()
+
+
+@app.get("/ping")
+def ping():
+    model_port = os.getenv(
+        "JOYOMNI_PORT",
+        os.getenv("PORT", "8080"),
+    )
+
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{model_port}/health",
+            timeout=2,
+        ) as response:
+            health = json.loads(response.read())
+
+        if health.get("runtime_loaded") is True:
+            return {
+                "status": "healthy",
+                "model": "ready",
+            }
+
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+    ):
+        pass
+
+    # RunPod load balancers treat 204 as initializing and 200 as ready.
+    return Response(status_code=204)
+
+
+if __name__ == "__main__":
+    health_port = int(os.getenv("PORT_HEALTH", "8081"))
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=health_port,
+        log_level="info",
+    )
