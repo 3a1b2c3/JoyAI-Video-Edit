@@ -296,25 +296,25 @@ vae.requires_grad_(False)
 print(f"  ✓ VAE loaded (bf16, CPU)")
 mem_info("After VAE load")
 
-# Load text encoder on CPU (save GPU memory for diffusion)
+# Load Qwen2.5-VL for both text and image conditioning
 try:
-    print("  Loading text encoder (CPU)...")
-    text_encoder_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/text_encoder")
-    if text_encoder_ckpt.exists():
-        from xvideo.models.models import load_text_encoder
-        tokenizer, text_encoder = load_text_encoder(
-            str(text_encoder_ckpt),
-            device=torch.device("cpu"),
-            torch_dtype=torch.float16
-        )
-        text_encoder.eval()
-        print(f"  ✓ Text encoder loaded (CPU)")
+    print("  Loading Qwen2.5-VL for image/text encoding...")
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    qwen_processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct", local_files_only=False)
+    qwen_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        "Qwen/Qwen2.5-VL-7B-Instruct",
+        local_files_only=False,
+        torch_dtype=torch.float16,
+        device_map="cpu"
+    )
+    qwen_model.eval()
+    print(f"  ✓ Qwen2.5-VL loaded (CPU)")
 except Exception as e:
-    print(f"  ⚠ Text encoder not available: {e}")
-    text_encoder = None
-    tokenizer = None
+    print(f"  ⚠ Qwen encoder not available: {e}")
+    qwen_processor = None
+    qwen_model = None
 
-print(f"  Note: DiT 32GB on GPU + VAE 3GB on CPU + encoder on CPU (saves GPU for diffusion)")
+print(f"  Note: DiT 32GB on GPU + VAE 3GB on CPU + Qwen2.5-VL on CPU (saves GPU for diffusion)")
 
 # Clear memory and summary
 gc.collect()
@@ -360,10 +360,60 @@ with torch.no_grad():
     print(f"  Memory: {mem_after_encode:.1f}GB ({mem_after_encode - mem_before_encode:+.1f}GB)")
 print()
 
-# Diffusion with Classifier-Free Guidance (CFG)
+# Encode style image with Qwen2.5-VL
+style_image_path = os.environ.get("JOYAI_REF_IMAGE", "assets/image.png")
+context_style = None
+if qwen_processor is not None and qwen_model is not None:
+    try:
+        from PIL import Image
+        print(f"[3.5/5] Encoding style image with Qwen2.5-VL: {style_image_path}...")
+        style_img = Image.open(style_image_path).convert("RGB")
+
+        # Create image description prompt
+        prompt = "Describe the visual style, colors, atmosphere, and artistic composition of this image."
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": style_img},
+                    {"type": "text", "text": prompt}
+                ]
+            }
+        ]
+
+        # Prepare inputs
+        text = qwen_processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = qwen_processor(text=text, images=[style_img], return_tensors="pt")
+
+        # Extract embeddings (get hidden states from last layer)
+        with torch.no_grad():
+            outputs = qwen_model(**{k: v.to("cpu") for k, v in inputs.items()}, output_hidden_states=True)
+            # Get last hidden state (should be [1, seq_len, 4096] or similar)
+            context_style = outputs.hidden_states[-1]
+            # Trim or pad to [1, 256, 4096]
+            seq_len = context_style.shape[1]
+            if seq_len >= 256:
+                context_style = context_style[:, :256, :]
+            else:
+                # Pad with zeros
+                pad_size = 256 - seq_len
+                context_style = torch.cat([
+                    context_style,
+                    torch.zeros(1, pad_size, context_style.shape[-1], device=context_style.device)
+                ], dim=1)
+
+        context_style = context_style.to(device).to(torch.bfloat16)
+        print(f"  ✓ Style context shape: {context_style.shape}")
+    except Exception as e:
+        print(f"  ⚠ Style encoding failed: {e}")
+        import traceback
+        traceback.print_exc()
+        context_style = None
+
+# Diffusion with Classifier-Free Guidance (CFG) + Style
 steps = int(sys.argv[7]) if len(sys.argv) > 7 else 1
 cfg_scale = 7.5  # Guidance scale (7.5 = strong guidance, 1.0 = no guidance)
-print(f"[4/5] Diffusion ({steps} steps, CFG={cfg_scale})...")
+print(f"[4/5] Diffusion ({steps} steps, CFG={cfg_scale}, style={'yes' if context_style is not None else 'no'})...")
 mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
 
@@ -372,7 +422,11 @@ with torch.no_grad():
         t = (steps - step - 1) / steps
         t_idx = int(t * 1000)
         t_tensor = torch.full((latents.shape[0],), t_idx, device=device, dtype=torch.long)
-        context = torch.randn(latents.shape[0], 256, 4096, dtype=torch.bfloat16, device=device)
+        # Use style-encoded context if available, otherwise random
+        if context_style is not None:
+            context = context_style
+        else:
+            context = torch.randn(latents.shape[0], 256, 4096, dtype=torch.bfloat16, device=device)
 
         # Conditional forward pass (with context)
         output_cond = dit(latents, t_tensor, context)
