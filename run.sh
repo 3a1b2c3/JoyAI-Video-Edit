@@ -286,25 +286,25 @@ vae.requires_grad_(False)
 print(f"  ✓ VAE loaded (bf16, CPU)")
 mem_info("After VAE load")
 
-# Load text encoder on GPU if available
+# Load text encoder on CPU (save GPU memory for diffusion)
 try:
-    print("  Loading text encoder (GPU)...")
+    print("  Loading text encoder (CPU)...")
     text_encoder_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/text_encoder")
     if text_encoder_ckpt.exists():
         from xvideo.models.models import load_text_encoder
         tokenizer, text_encoder = load_text_encoder(
             str(text_encoder_ckpt),
-            device=torch.device("cuda"),
+            device=torch.device("cpu"),
             torch_dtype=torch.float16
         )
         text_encoder.eval()
-        print(f"  ✓ Text encoder loaded (GPU)")
+        print(f"  ✓ Text encoder loaded (CPU)")
 except Exception as e:
     print(f"  ⚠ Text encoder not available: {e}")
     text_encoder = None
     tokenizer = None
 
-print(f"  Note: DiT 16GB on GPU + VAE 3GB on CPU + encoder on GPU (saves GPU during load)")
+print(f"  Note: DiT 32GB on GPU + VAE 3GB on CPU + encoder on CPU (saves GPU for diffusion)")
 
 # Clear memory and summary
 gc.collect()
