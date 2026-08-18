@@ -41,14 +41,14 @@ echo "  TORCH_HOME: $TORCH_HOME (cached)"
 echo "  HF_HOME: $HF_HOME (cached)"
 echo ""
 
-# Parse arguments
+# Parse arguments with sensible defaults
 VIDEO="${1:-assets/cases/omnidream/mattress.mp4}"
-OUTPUT="${2:-$SCRIPT_DIR/outputs/dit_output.mp4}"
+OUTPUT="${2:-$SCRIPT_DIR/outputs/stylized_output.mp4}"
 REF_IMAGE="${3:-assets/image.png}"
-FRAMES="${4:-1}"
+FRAMES="${4:-all}"  # "all" = process entire video, or specify number
 HEIGHT="${5:-256}"
 WIDTH="${6:-256}"
-STEPS="${7:-1}"
+STEPS="${7:-5}"  # More steps for better quality
 
 # Resolve full output path upfront
 OUTPUT_FULL=$(cd "$(dirname "$SCRIPT_DIR/$OUTPUT")" 2>/dev/null && pwd -P)/$(basename "$OUTPUT") || echo "$SCRIPT_DIR/$OUTPUT"
@@ -172,7 +172,7 @@ seed_everything(42)
 
 # Load video
 video_path = sys.argv[1] if len(sys.argv) > 1 else "assets/Recording 2026-08-12 205529.mp4"
-frames_to_load = int(sys.argv[4]) if len(sys.argv) > 4 else 1
+frames_arg = sys.argv[4] if len(sys.argv) > 4 else "all"
 height = int(sys.argv[5]) if len(sys.argv) > 5 else 256
 width = int(sys.argv[6]) if len(sys.argv) > 6 else 256
 
@@ -183,9 +183,11 @@ if not Path(video_path).exists():
 
 cap = cv2.VideoCapture(video_path)
 fps = cap.get(cv2.CAP_PROP_FPS)
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+frames_to_load = total_frames if frames_arg == "all" else int(frames_arg)
 frames = []
 
-for i in range(min(frames_to_load, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))):
+for i in range(min(frames_to_load, total_frames)):
     ok, bgr = cap.read()
     if not ok:
         break
