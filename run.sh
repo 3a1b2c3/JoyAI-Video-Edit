@@ -361,7 +361,7 @@ with torch.no_grad():
 print()
 
 # Encode style image with Qwen2.5-VL
-style_image_path = os.environ.get("JOYAI_REF_IMAGE", "assets/image.png")
+style_image_path = os.environ.get("JOYAI_REF_IMAGE", "/home/horde/JoyAI-Video-Edit/assets/image.png")
 context_style = None
 if qwen_processor is not None and qwen_model is not None:
     try:
