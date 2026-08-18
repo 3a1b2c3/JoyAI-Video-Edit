@@ -269,10 +269,10 @@ mem_after_cleanup = torch.cuda.memory_allocated() / 1e9
 print(f"  ✓ DiT loaded (final: {mem_after_cleanup:.1f}GB)")
 
 # Load VAE in bf16 (matches DiT dtype)
-print("  Loading VAE (bf16, GPU)...")
+print("  Loading VAE (bf16, CPU)...")
 vae_ckpt = Path("deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
 vae = XVAEChunkCausal.from_pretrained(str(vae_ckpt), torch_dtype=torch.bfloat16)
-vae = vae.to(device)
+vae = vae.to("cpu")
 # Force all VAE parameters/buffers to bf16 (fixes bias dtype mismatches)
 for param in vae.parameters():
     if param.dtype != torch.bfloat16:
@@ -283,7 +283,7 @@ for buf in vae.buffers():
             buf.data = buf.data.to(torch.bfloat16)
 vae.eval()
 vae.requires_grad_(False)
-print(f"  ✓ VAE loaded (bf16, GPU)")
+print(f"  ✓ VAE loaded (bf16, CPU)")
 mem_info("After VAE load")
 
 # Load text encoder on GPU if available
@@ -325,7 +325,8 @@ mem_before_encode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
 with torch.no_grad():
     frames_chw = frames_tensor.permute(0, 3, 1, 2)
-    # Frames already on GPU, VAE on GPU
+    # Move frames to CPU for VAE encoding (VAE is on CPU)
+    frames_chw = frames_chw.to("cpu")
     latents_list = []
     for i in tqdm(range(len(frames_chw)), desc="Encoding"):
         try:
@@ -389,11 +390,15 @@ mem_before_decode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before decoding: {mem_before_decode:.1f}GB")
 with torch.no_grad():
     latents_decoded = latents / 0.18215
-    # VAE on GPU, latents already on GPU
+    # Move to CPU if VAE is on CPU (device mismatch fix)
+    if str(vae.device) == 'cpu':
+        latents_decoded = latents_decoded.to("cpu")
     frames_decoded = []
     for i in tqdm(range(len(latents_decoded)), desc="Decoding"):
         try:
             frame = vae.decode(latents_decoded[i:i+1]).sample
+            # Ensure output is on GPU if we need it there
+            frame = frame.to(device)
             frames_decoded.append(frame)
             torch.cuda.empty_cache()
         except Exception as e:
