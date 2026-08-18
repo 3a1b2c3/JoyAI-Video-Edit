@@ -321,11 +321,15 @@ print()
 
 # Encode
 print("[3/5] VAE encoding...")
+# Move DiT to CPU to free GPU memory for VAE encoding
+print("  Moving DiT to CPU...")
+dit = dit.to("cpu")
+gc.collect()
+torch.cuda.empty_cache()
 mem_before_encode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
 with torch.no_grad():
     frames_chw = frames_tensor.permute(0, 3, 1, 2)
-    # Move frames to CPU for VAE encoding (VAE is on CPU)
     frames_chw = frames_chw.to("cpu")
     latents_list = []
     for i in tqdm(range(len(frames_chw)), desc="Encoding"):
