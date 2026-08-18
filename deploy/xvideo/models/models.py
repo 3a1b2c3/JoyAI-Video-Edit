@@ -146,6 +146,15 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
         else:
             model = model.to(device=device)
 
+    # Force all parameters and buffers to target dtype (fix bias dtype mismatches)
+    for param in model.parameters():
+        if param.dtype != dtype:
+            param.data = param.data.to(dtype=dtype)
+    for buf in model.buffers():
+        if buf.dtype not in (torch.long, torch.int, torch.bool):  # skip integer/bool tensors
+            if buf.dtype != dtype:
+                buf.data = buf.data.to(dtype=dtype)
+
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
     logger.info(f"DiT on {device}: {torch.cuda.memory_allocated()/1e9:.1f}GB allocated")
