@@ -133,9 +133,17 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
         if unexpected:
             logger.warning(f"Unexpected keys when loading DiT: {unexpected[:20]}")
 
+    # Ensure all parameters are in target dtype (fixes bias dtype mismatches)
+    for name, param in model.named_parameters():
+        if param.dtype != dtype:
+            param.data = param.data.to(dtype=dtype)
+    for name, buf in model.named_buffers():
+        if buf.dtype != dtype and buf.dtype in (torch.float32, torch.float16):
+            buf.data = buf.data.to(dtype=dtype)
+
     total_params = sum(p.numel() for p in model.parameters())
     logger.info(f"Instantiate model with {total_params / 1e9:.2f}B parameters")
-    logger.info(f"DiT resident fully on {device}: {torch.cuda.memory_allocated()/1e9:.1f}GB allocated")
+    logger.info(f"DiT on {device}: {torch.cuda.memory_allocated()/1e9:.1f}GB allocated")
 
     return model.eval()
 
