@@ -116,8 +116,36 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
                 v = v.reshape_as(v.new_zeros(model.img_in.weight.shape))
             load_state_dict[k] = v
 
-        logger.info(f"Loading state_dict into model...")
-        missing_keys, unexpected_keys = model.load_state_dict(load_state_dict, strict=True)
+        logger.info(f"Loading state_dict into model (streaming to avoid memory spike)...")
+        # Load tensors one-by-one into model to avoid allocating entire state_dict at once
+        missing_keys = []
+        unexpected_keys = set(model.state_dict().keys())
+
+        for i, (k, v) in enumerate(load_state_dict.items()):
+            try:
+                # Get reference to the actual model parameter/buffer
+                parts = k.split('.')
+                obj = model
+                for part in parts[:-1]:
+                    obj = getattr(obj, part)
+                param = getattr(obj, parts[-1])
+
+                # Copy value directly into model's parameter
+                param.data.copy_(v)
+                unexpected_keys.discard(k)
+
+                if (i + 1) % 100 == 0:
+                    mem_alloc = torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0
+                    logger.debug(f"  Loaded {i+1}/{len(load_state_dict)} tensors. GPU: {mem_alloc:.1f}GB")
+                    # Explicitly free the checkpoint tensor
+                    del v
+                    if i % 500 == 0:
+                        torch.cuda.empty_cache()
+            except (AttributeError, KeyError) as e:
+                logger.debug(f"Could not load {k}: {e}")
+                missing_keys.append(k)
+
+        unexpected_keys = list(unexpected_keys)
         logger.info(f"State_dict loaded. GPU memory: {torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0:.1f}GB")
         if missing_keys:
             logger.warning(f"Missing keys when loading DiT: {missing_keys[:20]}")
