@@ -48,7 +48,7 @@ REF_IMAGE="${3:-assets/image.png}"
 FRAMES="${4:-10}"  # number of frames (10 = ~0.3 sec @ 30fps), "all" = entire video
 HEIGHT="${5:-auto}"
 WIDTH="${6:-auto}"
-STEPS="${7:-5}"  # More steps for better quality
+STEPS="${7:-20}"  # More steps for better quality (1-50, default 20)
 
 # Resolve full output path upfront
 OUTPUT_FULL=$(cd "$(dirname "$SCRIPT_DIR/$OUTPUT")" 2>/dev/null && pwd -P)/$(basename "$OUTPUT") || echo "$SCRIPT_DIR/$OUTPUT"
