@@ -132,6 +132,16 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 
+# Memory debug function
+def mem_info(label=""):
+    if label:
+        print(f"[MEM] {label}", flush=True)
+    allocated = torch.cuda.memory_allocated() / 1e9
+    reserved = torch.cuda.memory_reserved() / 1e9
+    total = torch.cuda.get_device_properties(0).total_memory / 1e9
+    available = total - reserved
+    print(f"  Allocated: {allocated:.1f}GB / Reserved: {reserved:.1f}GB / Total: {total:.1f}GB / Free: {available:.1f}GB", flush=True)
+
 # Ensure errors are always printed
 import traceback as tb_module
 def show_error(exc_type, exc_value, exc_traceback):
@@ -155,8 +165,7 @@ print(f"Device: {device}")
 print(f"GPU: {torch.cuda.get_device_name(0)}")
 print(f"Compute Capability: {torch.cuda.get_device_capability(0)}")
 print(f"VRAM Total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
-print(f"VRAM Allocated: {torch.cuda.memory_allocated() / 1e9:.1f}GB")
-print(f"VRAM Reserved: {torch.cuda.memory_reserved() / 1e9:.1f}GB")
+mem_info("Start")
 print()
 
 seed_everything(42)
@@ -217,10 +226,10 @@ cfg.dit_ckpt = str(dit_ckpt_path)  # Use quantized (2x smaller) checkpoint
 
 # Load DiT with quantized checkpoint (auto-dequantizes int8 tensors)
 print("  Loading DiT (quantized checkpoint, auto-dequantized to bf16)...")
-mem_before = torch.cuda.memory_allocated() / 1e9
-print(f"    GPU memory before: {mem_before:.1f}GB")
+mem_info("Before load_dit()")
 
 dit = load_dit(cfg, device=device)
+mem_info("After load_dit()")
 mem_after_load = torch.cuda.memory_allocated() / 1e9
 print(f"    GPU memory after load: {mem_after_load:.1f}GB (+{mem_after_load - mem_before:.1f}GB)")
 

@@ -109,7 +109,15 @@ with torch.no_grad():
         print(f"  Writing {len(output_frames)} frames...")
         iio.imwrite(str(output_path), output_frames, fps=24)
         mem_info("After imwrite")
-        print(f"  ✓ Saved: {output_path.resolve()}")
+
+        # Verify file exists
+        import os
+        if os.path.exists(output_path):
+            size = os.path.getsize(output_path)
+            print(f"  ✓ Saved: {output_path.resolve()} ({size} bytes)")
+            assert size > 0, f"File created but empty! {output_path}"
+        else:
+            raise FileNotFoundError(f"File not created: {output_path}")
     except Exception as e:
         print(f"  ❌ Error: {e}")
         import traceback
