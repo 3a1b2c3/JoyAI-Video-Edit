@@ -90,8 +90,14 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
                     for k, v in state_dict.items()
                 }
 
+        logger.info(f"Converting {len(state_dict)} tensors to {dtype}...")
         load_state_dict = {}
-        for k, v in state_dict.items():
+        for i, (k, v) in enumerate(state_dict.items()):
+            # Log progress every 100 tensors
+            if i % 100 == 0:
+                mem_alloc = torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0
+                logger.debug(f"  [{i}/{len(state_dict)}] GPU memory: {mem_alloc:.1f}GB")
+
             # Handle quantized checkpoints (dict with data+scale) and normal tensors
             if isinstance(v, dict) and "data" in v:
                 # Quantized tensor: dequantize
@@ -110,7 +116,9 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
                 v = v.reshape_as(v.new_zeros(model.img_in.weight.shape))
             load_state_dict[k] = v
 
+        logger.info(f"Loading state_dict into model...")
         missing_keys, unexpected_keys = model.load_state_dict(load_state_dict, strict=True)
+        logger.info(f"State_dict loaded. GPU memory: {torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0:.1f}GB")
         if missing_keys:
             logger.warning(f"Missing keys when loading DiT: {missing_keys[:20]}")
         if unexpected_keys:
