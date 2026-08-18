@@ -366,9 +366,6 @@ print(f"[4/5] Diffusion ({steps} steps)...")
 mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
 
-# Move model to GPU for diffusion (CPU offload mode)
-dit.to(device)
-
 with torch.no_grad():
     for step in tqdm(range(steps), desc="Denoising"):
         t = (steps - step - 1) / steps
