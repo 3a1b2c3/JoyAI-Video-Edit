@@ -360,9 +360,10 @@ with torch.no_grad():
     print(f"  Memory: {mem_after_encode:.1f}GB ({mem_after_encode - mem_before_encode:+.1f}GB)")
 print()
 
-# Diffusion
+# Diffusion with Classifier-Free Guidance (CFG)
 steps = int(sys.argv[7]) if len(sys.argv) > 7 else 1
-print(f"[4/5] Diffusion ({steps} steps)...")
+cfg_scale = 7.5  # Guidance scale (7.5 = strong guidance, 1.0 = no guidance)
+print(f"[4/5] Diffusion ({steps} steps, CFG={cfg_scale})...")
 mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
 
@@ -372,9 +373,21 @@ with torch.no_grad():
         t_idx = int(t * 1000)
         t_tensor = torch.full((latents.shape[0],), t_idx, device=device, dtype=torch.long)
         context = torch.randn(latents.shape[0], 256, 4096, dtype=torch.bfloat16, device=device)
-        model_output = dit(latents, t_tensor, context)
-        if isinstance(model_output, (tuple, list)):
-            model_output = model_output[0]
+
+        # Conditional forward pass (with context)
+        output_cond = dit(latents, t_tensor, context)
+        if isinstance(output_cond, (tuple, list)):
+            output_cond = output_cond[0]
+
+        # Unconditional forward pass (empty context for CFG)
+        context_uncond = torch.zeros_like(context)
+        output_uncond = dit(latents, t_tensor, context_uncond)
+        if isinstance(output_uncond, (tuple, list)):
+            output_uncond = output_uncond[0]
+
+        # Apply Classifier-Free Guidance
+        model_output = output_uncond + cfg_scale * (output_cond - output_uncond)
+
         sigma = np.sqrt(t / (1 - t)) if t > 0 else 0
         latents = latents + model_output * (-sigma * 0.1)
         torch.cuda.empty_cache()
