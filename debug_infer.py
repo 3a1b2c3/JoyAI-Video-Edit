@@ -46,7 +46,7 @@ def save_visual(tensor, name, step_name):
     else:
         frame_norm = torch.zeros_like(frame)
 
-    output = (frame_norm * 255).clamp(0, 255).cpu().numpy().astype(np.uint8)
+    output = (frame_norm * 255).clamp(0, 255).detach().cpu().numpy().astype(np.uint8)
     if output.shape[-1] == 1:
         output = np.repeat(output, 3, axis=-1)
 
