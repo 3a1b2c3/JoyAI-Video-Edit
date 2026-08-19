@@ -121,6 +121,110 @@ http://localhost:8080
 
 For remote machines, bind the server to `0.0.0.0` and open the selected port, or use SSH port forwarding.
 
+## 🔍 Debugging & Testing
+
+### Debug Inference Pipeline
+
+Trace quality issues step-by-step with detailed tensor statistics:
+
+```bash
+python debug_infer.py
+```
+
+This loads 1 frame and runs 3 diffusion steps, saving intermediate outputs to `debug_frames/`:
+- **01_encoded_latents.png** — Raw VAE encoded output (latents before diffusion)
+- **02_decoded_frame.png** — Output after diffusion and VAE decode
+- **03_final_output.mp4** — Final video output
+
+Check tensor statistics printed during execution:
+- Are latents reasonable (not all zeros/NaN)?
+- Is diffusion changing latents significantly?
+- Is decoded output smooth or pixelated/blocky?
+
+### Quick Tests
+
+**Test VAE/DiT with synthetic latents (2-3 min):**
+```bash
+python test_quick.py          # Pure Python
+bash test_quick.sh            # Via bash wrapper
+```
+
+**Test image encoding:**
+```bash
+python test_encode_image.py
+```
+
+**Test model loading:**
+```bash
+bash test_load.sh
+```
+
+**Test with text embeddings:**
+```bash
+python test_with_text.py
+```
+
+## 🎯 Inference Scripts
+
+### Image-Guided Editing (Style Image)
+
+Use a reference image for style guidance:
+
+```bash
+./run.sh <video> [output] [style_image] [frames] [height] [width] [steps] [cfg]
+```
+
+Example:
+```bash
+./run.sh assets/input.mp4 outputs/output.mp4 assets/image.png 10 auto auto 20 7.5
+```
+
+### Text-Prompt-Only Editing
+
+Use text descriptions only (no style image):
+
+```bash
+./run_text.sh <video> [output] [prompt] [frames] [height] [width] [steps] [cfg]
+```
+
+Example:
+```bash
+./run_text.sh assets/input.mp4 outputs/text_output.mp4 "beautiful landscape" 10 auto auto 20 7.5
+```
+
+### Python API
+
+Direct Python inference:
+
+```bash
+# Image-guided
+python infer.py assets/input.mp4 --style assets/image.png --frames 10 --steps 20 --cfg 7.5
+
+# Text-only
+python infer_text.py assets/input.mp4 --prompt "landscape" --frames 10 --steps 20 --cfg 7.5
+```
+
+## ⚙️ Key Parameters
+
+- **frames**: Number of frames to process (default: 10)
+- **height/width**: Resolution (default: auto-scale from video)
+- **steps**: Diffusion steps (20-50 for better quality, more time)
+- **cfg**: Classifier-Free Guidance scale (7.5 default, lower = smoother, higher = stronger guidance)
+
+## 🐛 Troubleshooting
+
+**Output looks pixelated/blocky:**
+- Increase `--steps` (try 50 instead of 20)
+- Lower `--cfg` (try 3.0 instead of 7.5)
+- Check intermediate frames with `python debug_infer.py`
+
+**joyomni_ops import fails:**
+- Rebuild: `cd deploy/joyomni_ops && python setup.py build_ext --inplace`
+
+**Out of memory:**
+- Reduce `--frames` 
+- Use text-only mode (text prompts use less memory than image encoding)
+
 ## 📚 Citation
 
 If JoyAI-Video-Edit is useful for your research or product prototype, please cite:
