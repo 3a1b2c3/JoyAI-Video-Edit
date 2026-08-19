@@ -49,6 +49,7 @@ FRAMES="${4:-10}"  # number of frames (10 = ~0.3 sec @ 30fps), "all" = entire vi
 HEIGHT="${5:-auto}"
 WIDTH="${6:-auto}"
 STEPS="${7:-20}"  # More steps for better quality (1-50, default 20)
+CFG="${8:-15.0}"  # CFG scale for style guidance (1.0 = none, 15.0 = very strong)
 
 # Resolve full output path upfront
 OUTPUT_FULL=$(cd "$(dirname "$SCRIPT_DIR/$OUTPUT")" 2>/dev/null && pwd -P)/$(basename "$OUTPUT") || echo "$SCRIPT_DIR/$OUTPUT"
@@ -130,6 +131,7 @@ export JOYAI_FRAMES="$FRAMES"
 export JOYAI_HEIGHT="$HEIGHT"
 export JOYAI_WIDTH="$WIDTH"
 export JOYAI_STEPS="$STEPS"
+export JOYAI_CFG="$CFG"
 
 # Load models and run diffusion
 $PYTHON -u << 'PYEOF'
@@ -369,8 +371,15 @@ if qwen_processor is not None and qwen_model is not None:
         print(f"[3.5/5] Encoding style image with Qwen2.5-VL: {style_image_path}...")
         style_img = Image.open(style_image_path).convert("RGB")
 
-        # Create image description prompt
-        prompt = "Describe the visual style, colors, atmosphere, and artistic composition of this image."
+        # Load style prompt from JSON config if available
+        import json
+        style_config_path = "assets/style_config.json"
+        if Path(style_config_path).exists():
+            with open(style_config_path) as f:
+                style_cfg = json.load(f)
+                prompt = style_cfg.get("style_prompt", "Describe the visual style, colors, and atmosphere of this image.")
+        else:
+            prompt = "Describe the visual style, colors, atmosphere, and artistic composition of this image."
         messages = [
             {
                 "role": "user",
@@ -412,7 +421,7 @@ if qwen_processor is not None and qwen_model is not None:
 
 # Diffusion with Classifier-Free Guidance (CFG) + Style
 steps = int(sys.argv[7]) if len(sys.argv) > 7 else 1
-cfg_scale = 7.5  # Guidance scale (7.5 = strong guidance, 1.0 = no guidance)
+cfg_scale = float(os.environ.get("JOYAI_CFG", "15.0"))  # Guidance scale (15.0 = very strong, 1.0 = none)
 print(f"[4/5] Diffusion ({steps} steps, CFG={cfg_scale}, style={'yes' if context_style is not None else 'no'})...")
 mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
