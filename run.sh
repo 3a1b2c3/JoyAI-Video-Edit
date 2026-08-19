@@ -314,7 +314,7 @@ try:
     qwen_model.eval()
     qwen_tokenizer = Qwen2Tokenizer.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct", local_files_only=False)
     print(f"  ✓ Qwen2.5-VL loaded (CPU, image + text capable)")
-print(f"  [DEBUG] Qwen model device: {next(qwen_model.parameters()).device}")
+    print(f"  [DEBUG] Qwen model device: {next(qwen_model.parameters()).device}")
 except Exception as e:
     print(f"  ⚠ Qwen encoder not available: {e}")
     qwen_processor = None
