@@ -1684,6 +1684,25 @@ async function beginSession() {
   return true;
 }
 
+// ZeroGPU identity handshake (same protocol as gradio's frontend): when embedded on
+// huggingface.co, the parent page can mint user-scoped quota headers for this space.
+// No readiness gate — asking before the parent's ack just resolves via the timeout,
+// whereas gating on the ack made a fast first click fall back to anonymous quota.
+if (window.parent !== window) {
+  try { window.parent.postMessage("supports-zerogpu-headers", "https://huggingface.co"); } catch (e) {}
+}
+
+function zgpuHeaders(timeoutMs = 2500) {
+  if (window.parent === window) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const ch = new MessageChannel();
+    const timer = setTimeout(() => { ch.port1.close(); resolve(null); }, timeoutMs);
+    ch.port1.onmessage = ({ data }) => { clearTimeout(timer); ch.port1.close(); resolve(data); };
+    try { window.parent.postMessage("zerogpu-headers", "https://huggingface.co", [ch.port2]); }
+    catch (e) { clearTimeout(timer); resolve(null); }
+  });
+}
+
 async function start() {
   startingRun = true;
   setSendBusy(true, t("busy_starting"));
@@ -1696,7 +1715,25 @@ async function start() {
     return;
   }
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${protocol}://${location.host}/ws`);
+  // Claim a user-scoped GPU identity before connecting: ask the huggingface.co parent
+  // page for quota headers (zerogpu-headers handshake), relay them over a plain GET
+  // (WS can't carry custom headers), then hand /ws the one-time claim ticket.
+  let wsQuery = "";
+  let zh = await zgpuHeaders();
+  if (zh instanceof Map) zh = Object.fromEntries(zh);
+  if (zh && typeof zh === "object" && Object.keys(zh).length) {
+    const mintSid = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    try {
+      const info = await (await fetch(`/mint/${mintSid}`, { headers: zh })).json();
+      console.log("[quota] identity mint:", info);
+      if (info.stashed) wsQuery = `?mint=${mintSid}`;
+    } catch (err) {
+      console.log("[quota] identity mint failed:", err);
+    }
+  } else {
+    console.log("[quota] no parent handshake (direct access or logged-out) — anonymous quota");
+  }
+  const socket = new WebSocket(`${protocol}://${location.host}/ws${wsQuery}`);
   ws = socket;
   socket.binaryType = "arraybuffer";
   socket.onopen = async () => {
@@ -1911,6 +1948,16 @@ async function start() {
         stopRecordDrain();
         sessionGranted = false;
         setSendBusy(false, t("busy_released"));
+        return;
+      }
+      if (msg.type === "error") {
+        stopVideoPull();
+        stopRecordDrain();
+        sessionGranted = false;
+        startingRun = false;
+        console.error("[server error]", msg.message || msg);
+        setSendBusy(false, String(msg.message || "server error"));
+        showOutputIdle(true);
         return;
       }
       return;
