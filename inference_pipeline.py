@@ -185,6 +185,13 @@ def encode_image(style_image_path, qwen_processor, qwen_model, vae, device):
     return context
 
 
+def broadcast_context(context, batch_size):
+    """Repeat context to match batch size"""
+    if context is not None and context.shape[0] == 1 and batch_size > 1:
+        context = context.repeat(batch_size, 1, 1)
+    return context
+
+
 def encode_vae(frames, vae, device):
     """VAE encode frames to latents"""
     print("[3/5] VAE encoding...")
@@ -310,6 +317,11 @@ def run_inference(video_path, output_path, style_image_path, num_frames, height,
 
     # Load video
     frames, fps = load_video(video_path, num_frames, height, width)
+
+    # Broadcast context to match batch size
+    batch_size = frames.shape[0]
+    if context is not None:
+        context = broadcast_context(context, batch_size)
 
     # Encode VAE
     latents = encode_vae(frames, vae, device)
