@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Quick test: skip VAE encode, test DiT diffusion with synthetic latents"""
+"""Quick test: skip VAE encode, test DiT diffusion with synthetic latents using joyomni_ops"""
 
-import torch
-import sys
 import os
+import sys
 import gc
 import numpy as np
 from pathlib import Path
 
+os.environ['PYTHONPATH'] = f"{os.getcwd()}/deploy/joyomni_ops:{os.getcwd()}/deploy:{os.environ.get('PYTHONPATH', '')}"
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
+# Must import joyomni_ops before torch
+import joyomni_ops  # noqa: F401
+
+import torch
 sys.path.insert(0, './deploy')
 
 from xvideo.models.models import load_dit

@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Test with real text embeddings (not random context)."""
+"""Test with real text embeddings (not random context) using joyomni_ops."""
 
+import os
 import sys
-import torch
 from pathlib import Path
 
+os.environ['PYTHONPATH'] = f"{os.getcwd()}/deploy/joyomni_ops:{os.getcwd()}/deploy:{os.environ.get('PYTHONPATH', '')}"
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
+# Must import joyomni_ops FIRST, before torch
+import joyomni_ops  # noqa: F401
+
+import torch
 sys.path.insert(0, './deploy')
 
 from xvideo.models.models import load_dit, load_text_encoder

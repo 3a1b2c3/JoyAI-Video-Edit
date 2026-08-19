@@ -4,17 +4,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+export PYTHONPATH="$SCRIPT_DIR/deploy/joyomni_ops:$SCRIPT_DIR/deploy:${PYTHONPATH:-}"
+export LD_LIBRARY_PATH="${CUDA_HOME:-/usr/local/cuda-12.4}/lib64:$(python3 -c 'import torch; print(torch.__path__[0])')/lib:${LD_LIBRARY_PATH:-}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TORCH_HOME="$SCRIPT_DIR/.cache/torch"
 export HF_HOME="$SCRIPT_DIR/.cache/huggingface"
 mkdir -p "$TORCH_HOME" "$HF_HOME"
 
 echo "=========================================="
-echo "DiT Model Loading Test"
+echo "DiT Model Loading Test (quantized + joyomni_ops)"
 echo "=========================================="
 echo ""
 
-python3 << 'PYEOF'
+python3 -u << 'PYEOF'
+# Import joyomni_ops FIRST, before torch
+import joyomni_ops  # noqa: F401
+
 import sys
 import torch
 from pathlib import Path
@@ -34,8 +39,8 @@ seed_everything(42)
 
 cfg = ExpConfig()
 cfg.training_mode = False
-cfg.dit_precision = "fp16"
-cfg.dit_ckpt = str(Path("deploy/deps/checkpoints/JoyAI-Video-Edit/dit/dit/joyai_video_edit_dit_0811.pth"))
+cfg.dit_precision = "bf16"
+cfg.dit_ckpt = str(Path("dit_quantized.pth"))  # Use quantized (2x smaller) checkpoint
 
 print("[1/3] Loading DiT...")
 mem_before = torch.cuda.memory_allocated() / 1e9
