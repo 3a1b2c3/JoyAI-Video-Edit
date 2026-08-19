@@ -163,7 +163,7 @@ def encode_image(style_image_path, qwen_processor, qwen_model, vae, device):
     # Project to 4096 dims if needed
     emb_dim = prompt_embeds.shape[-1]
     if emb_dim != 4096:
-        proj = torch.nn.Linear(emb_dim, 4096).to("cpu").to(prompt_embeds.dtype)
+        proj = torch.nn.Linear(emb_dim, 4096, dtype=prompt_embeds.dtype, device="cpu")
         with torch.no_grad():
             prompt_embeds = proj(prompt_embeds)
 
