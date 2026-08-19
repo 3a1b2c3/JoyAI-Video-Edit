@@ -419,6 +419,18 @@ try:
     if prompt_embeds is None or prompt_embeds.shape[0] == 0:
         raise ValueError(f"Encoding returned empty: {prompt_embeds.shape if prompt_embeds is not None else 'None'}")
 
+    # Get embedding dimension
+    emb_dim = prompt_embeds.shape[-1]
+    print(f"  [DEBUG] Embedding dim: {emb_dim}")
+
+    # Project 3584 → 4096 if needed
+    if emb_dim != 4096:
+        print(f"  [DEBUG] Projecting {emb_dim} → 4096")
+        proj = torch.nn.Linear(emb_dim, 4096).to("cpu")
+        with torch.no_grad():
+            prompt_embeds = proj(prompt_embeds)
+        print(f"  [DEBUG] After projection: {prompt_embeds.shape}")
+
     # Trim/pad to [1, 256, 4096]
     seq_len = prompt_embeds.shape[1]
     if seq_len >= 256:
@@ -427,7 +439,7 @@ try:
         pad_size = 256 - seq_len
         context_style = torch.cat([
             prompt_embeds,
-            torch.zeros(1, pad_size, prompt_embeds.shape[-1], device=prompt_embeds.device)
+            torch.zeros(1, pad_size, 4096, device=prompt_embeds.device)
         ], dim=1)
 
     context_style = context_style.to(device).to(torch.bfloat16)

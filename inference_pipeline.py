@@ -160,6 +160,13 @@ def encode_image(style_image_path, qwen_processor, qwen_model, vae, device):
         outputs = qwen_model(**{k: v.to("cpu") for k, v in inputs.items()}, output_hidden_states=True)
         prompt_embeds = outputs.hidden_states[-1]
 
+    # Project to 4096 dims if needed
+    emb_dim = prompt_embeds.shape[-1]
+    if emb_dim != 4096:
+        proj = torch.nn.Linear(emb_dim, 4096).to("cpu")
+        with torch.no_grad():
+            prompt_embeds = proj(prompt_embeds)
+
     # Trim/pad to [1, 256, 4096]
     seq_len = prompt_embeds.shape[1]
     if seq_len >= 256:
@@ -168,7 +175,7 @@ def encode_image(style_image_path, qwen_processor, qwen_model, vae, device):
         pad_size = 256 - seq_len
         context = torch.cat([
             prompt_embeds,
-            torch.zeros(1, pad_size, prompt_embeds.shape[-1], device=prompt_embeds.device)
+            torch.zeros(1, pad_size, 4096, device=prompt_embeds.device)
         ], dim=1)
 
     context = context.to(device).to(torch.bfloat16)
