@@ -380,69 +380,53 @@ with torch.no_grad():
     print(f"  Memory: {mem_after_encode:.1f}GB ({mem_after_encode - mem_before_encode:+.1f}GB)")
 print()
 
-# Encode style image with Qwen2.5-VL
+# Encode style image using pipeline.py approach
 context_style = None
-if qwen_processor is not None and qwen_model is not None:
-    try:
-        from PIL import Image
-        style_image_path = os.environ.get("JOYAI_REF_IMAGE", "/home/horde/JoyAI-Video-Edit/assets/image.png")
+style_image_path = os.environ.get("JOYAI_REF_IMAGE", "/home/horde/JoyAI-Video-Edit/assets/image.png")
 
-        print(f"[3.5/5] Encoding style image with Qwen2.5-VL...")
+# VALIDATION: Check if style image exists
+if not Path(style_image_path).exists():
+    print(f"❌ ERROR: Style image not found: {style_image_path}")
+    sys.exit(1)
 
-        # Load image
-        style_img = Image.open(style_image_path).convert("RGB")
-        print(f"  [DEBUG] Image size: {style_img.size}")
+if qwen_processor is None or qwen_model is None:
+    print(f"❌ ERROR: Qwen2.5-VL encoder not available (failed to load)")
+    sys.exit(1)
 
-        # Process image with processor (text=empty to get just image tokens)
-        inputs = qwen_processor(images=[style_img], return_tensors="pt")
-        print(f"  [DEBUG] Processor output keys: {list(inputs.keys())}")
-        for k, v in inputs.items():
-            if hasattr(v, 'shape'):
-                print(f"  [DEBUG]   {k}: shape={v.shape}")
+print(f"[3.5/5] Encoding style image with Qwen2.5-VL (pipeline approach)...")
 
-        # Extract image embeddings by running encoder only (not full model)
-        with torch.no_grad():
-            # Use vision encoder directly
-            if hasattr(qwen_model, 'visual'):
-                vision_model = qwen_model.visual
-            else:
-                vision_model = qwen_model.model.vision_model
+try:
+    from PIL import Image
+    from xvideo.models.pipeline import Pipeline
 
-            # Get image features
-            pixel_values = inputs['pixel_values'].to('cpu')
-            image_grid_thw = inputs.get('image_grid_thw')
+    # Load image
+    style_img = Image.open(style_image_path).convert("RGB")
+    print(f"  ✓ Loaded image: {style_image_path} ({style_img.size})")
 
-            print(f"  [DEBUG] Running vision encoder...")
-            image_features = vision_model(pixel_values)
+    # Create temporary pipeline instance for encode_prompt_multiple_images
+    pipeline = Pipeline(vae=None, text_encoder=qwen_model, tokenizer=None, transformer=None, scheduler=None)
+    pipeline.qwen_processor = qwen_processor
 
-            if hasattr(image_features, 'last_hidden_state'):
-                image_emb = image_features.last_hidden_state
-            else:
-                image_emb = image_features[0] if isinstance(image_features, tuple) else image_features
+    # Use pipeline's encode_prompt_multiple_images (reuse existing code)
+    prompt = ["Describe the visual style, colors, atmosphere, and artistic composition of this image."]
+    prompt_embeds, prompt_embeds_mask = pipeline.encode_prompt_multiple_images(
+        prompt=prompt,
+        images=[style_img],
+        device="cpu",
+        max_sequence_length=256
+    )
 
-            print(f"  [DEBUG] Image embedding shape: {image_emb.shape}")
+    print(f"  [DEBUG] Prompt embeds shape: {prompt_embeds.shape}")
+    if prompt_embeds is None or prompt_embeds.shape[0] == 0:
+        raise ValueError(f"Prompt encoding returned empty: {prompt_embeds.shape if prompt_embeds is not None else 'None'}")
 
-            # Reshape to [1, 256, 4096] if needed
-            batch, seq_len, emb_dim = image_emb.shape[0], image_emb.shape[1], image_emb.shape[-1]
-
-            if seq_len >= 256:
-                context_style = image_emb[:, :256, :]
-                print(f"  [DEBUG] Trimmed to seq_len=256")
-            else:
-                pad_size = 256 - seq_len
-                context_style = torch.cat([
-                    image_emb,
-                    torch.zeros(batch, pad_size, emb_dim, device=image_emb.device)
-                ], dim=1)
-                print(f"  [DEBUG] Padded +{pad_size} → seq_len=256")
-
-        context_style = context_style.to(device).to(torch.bfloat16)
-        print(f"  ✓ Context shape: {context_style.shape}, dtype: {context_style.dtype}")
-    except Exception as e:
-        print(f"  ⚠ Style encoding failed: {e}")
-        import traceback
-        traceback.print_exc()
-        context_style = None
+    context_style = prompt_embeds.to(device).to(torch.bfloat16)
+    print(f"  ✓ Context shape: {context_style.shape}, dtype: {context_style.dtype}")
+except Exception as e:
+    print(f"❌ ERROR: Style encoding failed: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
 
 print()
 
