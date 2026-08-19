@@ -426,7 +426,7 @@ try:
     # Project 3584 → 4096 if needed
     if emb_dim != 4096:
         print(f"  [DEBUG] Projecting {emb_dim} → 4096")
-        proj = torch.nn.Linear(emb_dim, 4096).to("cpu")
+        proj = torch.nn.Linear(emb_dim, 4096).to("cpu").to(prompt_embeds.dtype)
         with torch.no_grad():
             prompt_embeds = proj(prompt_embeds)
         print(f"  [DEBUG] After projection: {prompt_embeds.shape}")
