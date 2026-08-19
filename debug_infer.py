@@ -37,7 +37,8 @@ def save_visual(tensor, name, step_name):
     else:
         frame = tensor[0]
 
-    # Normalize to 0-255
+    # Normalize to 0-255 (convert to float32 for numpy compatibility)
+    frame = frame.to(torch.float32)
     frame_min = frame.min()
     frame_max = frame.max()
     if frame_max > frame_min:
