@@ -380,19 +380,9 @@ if qwen_processor is not None and qwen_model is not None:
                 prompt = style_cfg.get("style_prompt", "Describe the visual style, colors, and atmosphere of this image.")
         else:
             prompt = "Describe the visual style, colors, atmosphere, and artistic composition of this image."
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": style_img},
-                    {"type": "text", "text": prompt}
-                ]
-            }
-        ]
 
-        # Prepare inputs
-        text = qwen_processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = qwen_processor(text=text, images=[style_img], return_tensors="pt")
+        # Prepare inputs directly (avoid jinja2 dependency)
+        inputs = qwen_processor(text=prompt, images=[style_img], return_tensors="pt")
 
         # Extract embeddings (get hidden states from last layer)
         with torch.no_grad():
