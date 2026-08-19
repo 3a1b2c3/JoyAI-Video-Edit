@@ -50,6 +50,7 @@ HEIGHT="${5:-auto}"
 WIDTH="${6:-auto}"
 STEPS="${7:-20}"  # More steps for better quality (1-50, default 20)
 CFG="${8:-15.0}"  # CFG scale for style guidance (1.0 = none, 15.0 = very strong)
+PROMPT="${9:-}"  # Text prompt for guidance (optional, complements style image)
 
 # Resolve full output path upfront
 OUTPUT_FULL=$(cd "$(dirname "$SCRIPT_DIR/$OUTPUT")" 2>/dev/null && pwd -P)/$(basename "$OUTPUT") || echo "$SCRIPT_DIR/$OUTPUT"
@@ -132,6 +133,7 @@ export JOYAI_HEIGHT="$HEIGHT"
 export JOYAI_WIDTH="$WIDTH"
 export JOYAI_STEPS="$STEPS"
 export JOYAI_CFG="$CFG"
+export JOYAI_PROMPT="$PROMPT"
 
 # Load models and run diffusion
 $PYTHON -u << 'PYEOF'
@@ -301,7 +303,7 @@ mem_info("After VAE load")
 # Load Qwen2.5-VL for both text and image conditioning
 try:
     print("  Loading Qwen2.5-VL for image/text encoding...")
-    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration, Qwen2Tokenizer
     qwen_processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct", local_files_only=False)
     qwen_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2.5-VL-7B-Instruct",
@@ -310,13 +312,18 @@ try:
         device_map="cpu"
     )
     qwen_model.eval()
-    print(f"  ✓ Qwen2.5-VL loaded (CPU)")
+    qwen_tokenizer = Qwen2Tokenizer.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct", local_files_only=False)
+    print(f"  ✓ Qwen2.5-VL loaded (CPU, image + text capable)")
+print(f"  [DEBUG] Qwen model device: {next(qwen_model.parameters()).device}")
 except Exception as e:
     print(f"  ⚠ Qwen encoder not available: {e}")
     qwen_processor = None
     qwen_model = None
+    qwen_tokenizer = None
 
-print(f"  Note: DiT 32GB on GPU + VAE 3GB on CPU + Qwen2.5-VL on CPU (saves GPU for diffusion)")
+mem_after_qwen = torch.cuda.memory_allocated() / 1e9
+print(f"  Note: DiT 32GB on GPU + VAE 3GB on CPU + Qwen2.5-VL on CPU")
+print(f"  [DEBUG] Memory after encoder load: {mem_after_qwen:.1f}GB")
 
 # Clear memory and summary
 gc.collect()
@@ -335,26 +342,42 @@ print()
 print("[3/5] VAE encoding...")
 mem_before_encode = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
+print(f"  [DEBUG] frames_tensor: {frames_tensor.shape} {frames_tensor.dtype} on {frames_tensor.device}")
+
 with torch.no_grad():
     frames_chw = frames_tensor.permute(0, 3, 1, 2)
+    print(f"  [DEBUG] After permute: {frames_chw.shape}")
     frames_chw = frames_chw.to("cpu")
+    print(f"  [DEBUG] Moved to CPU: {frames_chw.device}")
+
     latents_list = []
     for i in tqdm(range(len(frames_chw)), desc="Encoding"):
         try:
             z = frames_chw[i:i+1].unsqueeze(2)
+            print(f"  [DEBUG] Frame {i}: z shape={z.shape} on {z.device}")
             posterior = vae.encode(z).latent_dist
             sample = posterior.sample() * 0.18215
+            print(f"  [DEBUG] Frame {i}: latent shape={sample.shape}")
             latents_list.append(sample)
         except Exception as e:
             print(f"  ⚠ Frame {i} encode error: {e}")
+            import traceback
+            traceback.print_exc()
             continue
+
+    print(f"  [DEBUG] Encoded {len(latents_list)} frames successfully")
     if latents_list:
         latents = torch.cat(latents_list, dim=0)
+        print(f"  [DEBUG] Concatenated latents: {latents.shape}")
     else:
         print("  WARNING: latents_list empty, using raw frames")
         latents = frames_chw[:1]
+
     # Move latents to GPU for diffusion
+    print(f"  [DEBUG] Moving latents to GPU...")
     latents = latents.to("cuda")
+    print(f"  [DEBUG] Latents on GPU: {latents.shape} {latents.dtype} on {latents.device}")
+
     gc.collect()
     torch.cuda.empty_cache()
     mem_after_encode = torch.cuda.memory_allocated() / 1e9
@@ -362,70 +385,130 @@ with torch.no_grad():
     print(f"  Memory: {mem_after_encode:.1f}GB ({mem_after_encode - mem_before_encode:+.1f}GB)")
 print()
 
-# Encode style image with Qwen2.5-VL
-style_image_path = os.environ.get("JOYAI_REF_IMAGE", "/home/horde/JoyAI-Video-Edit/assets/image.png")
+# Encode style image + optional text prompt with Qwen2.5-VL
 context_style = None
 if qwen_processor is not None and qwen_model is not None:
     try:
         from PIL import Image
-        print(f"[3.5/5] Encoding style image with Qwen2.5-VL: {style_image_path}...")
+        style_image_path = os.environ.get("JOYAI_REF_IMAGE", "/home/horde/JoyAI-Video-Edit/assets/image.png")
+        user_prompt = os.environ.get("JOYAI_PROMPT", "").strip()
+
+        print(f"[3.5/5] Encoding context (image + prompt)...")
+
+        # Load style image
         style_img = Image.open(style_image_path).convert("RGB")
 
-        # Load style prompt from JSON config if available
+        # Determine text prompt to use (JSON config by default, env override)
         import json
         style_config_path = "assets/style_config.json"
+        text_prompt = None
+
+        # Try JSON config first
         if Path(style_config_path).exists():
-            with open(style_config_path) as f:
-                style_cfg = json.load(f)
-                prompt = style_cfg.get("style_prompt", "Describe the visual style, colors, and atmosphere of this image.")
-        else:
-            prompt = "Describe the visual style, colors, atmosphere, and artistic composition of this image."
+            try:
+                with open(style_config_path) as f:
+                    style_cfg = json.load(f)
+                    text_prompt = style_cfg.get("style_prompt")
+                    if text_prompt:
+                        print(f"  [DEBUG] Loaded prompt from JSON config")
+            except Exception as e:
+                print(f"  [DEBUG] Failed to load JSON config: {e}")
 
-        # Prepare inputs directly (avoid jinja2 dependency)
-        inputs = qwen_processor(text=prompt, images=[style_img], return_tensors="pt")
+        # Override with env var if provided
+        if user_prompt:
+            text_prompt = user_prompt
+            print(f"  [DEBUG] Overriding with JOYAI_PROMPT env var")
 
-        # Extract embeddings (get hidden states from last layer)
+        # Fallback if no prompt found
+        if not text_prompt:
+            text_prompt = "Describe the visual style, colors, atmosphere, and artistic composition of this image."
+            print(f"  [DEBUG] Using fallback prompt")
+
+        print(f"  Using prompt: '{text_prompt[:80]}...'" if len(text_prompt) > 80 else f"  Using prompt: '{text_prompt}'")
+
+        # Encode image + text prompt together
+        print(f"  [DEBUG] Processing inputs...")
+        inputs = qwen_processor(text=text_prompt, images=[style_img], return_tensors="pt")
+        print(f"  [DEBUG] Input keys: {list(inputs.keys())}")
+        for k, v in inputs.items():
+            if hasattr(v, 'shape'):
+                print(f"  [DEBUG]   {k}: {v.shape} {v.dtype}")
+
+        print(f"  [DEBUG] Running Qwen2.5-VL forward pass...")
         with torch.no_grad():
             outputs = qwen_model(**{k: v.to("cpu") for k, v in inputs.items()}, output_hidden_states=True)
-            # Get last hidden state (should be [1, seq_len, 4096] or similar)
             context_style = outputs.hidden_states[-1]
+            print(f"  [DEBUG] Hidden states[-1] shape: {context_style.shape} dtype: {context_style.dtype}")
+
             # Trim or pad to [1, 256, 4096]
             seq_len = context_style.shape[1]
+            emb_dim = context_style.shape[-1]
+            print(f"  [DEBUG] Original: seq_len={seq_len}, emb_dim={emb_dim}")
+
             if seq_len >= 256:
                 context_style = context_style[:, :256, :]
+                print(f"  [DEBUG] Trimmed to seq_len=256")
             else:
-                # Pad with zeros
                 pad_size = 256 - seq_len
                 context_style = torch.cat([
                     context_style,
                     torch.zeros(1, pad_size, context_style.shape[-1], device=context_style.device)
                 ], dim=1)
+                print(f"  [DEBUG] Padded +{pad_size} → seq_len=256")
 
+        print(f"  [DEBUG] Moving to device {device} as bf16...")
         context_style = context_style.to(device).to(torch.bfloat16)
-        print(f"  ✓ Style context shape: {context_style.shape}")
+        print(f"  ✓ Context shape: {context_style.shape}, device: {context_style.device}, dtype: {context_style.dtype}")
     except Exception as e:
-        print(f"  ⚠ Style encoding failed: {e}")
+        print(f"  ⚠ Context encoding failed: {e}")
         import traceback
         traceback.print_exc()
         context_style = None
 
-# Diffusion with Classifier-Free Guidance (CFG) + Style
+# CRITICAL: Fail if neither image conditioning nor text prompt
+has_image = context_style is not None
+has_prompt_config = Path("assets/style_config.json").exists()
+user_prompt = os.environ.get("JOYAI_PROMPT", "").strip()
+
+print(f"  [DEBUG] Conditioning check: has_image={has_image}, has_prompt_config={has_prompt_config}, user_prompt={'yes' if user_prompt else 'no'}")
+
+if not has_image and not has_prompt_config and not user_prompt:
+    print("  ❌ ERROR: No conditioning provided!")
+    print("     Either:")
+    print("     1. Provide JOYAI_REF_IMAGE (style image path)")
+    print("     2. Provide JOYAI_PROMPT (text prompt)")
+    print("     3. Create assets/style_config.json with style_prompt")
+    sys.exit(1)
+
+print()
+
+# Diffusion with Classifier-Free Guidance (CFG) + Style + Prompt
 steps = int(sys.argv[7]) if len(sys.argv) > 7 else 1
 cfg_scale = float(os.environ.get("JOYAI_CFG", "15.0"))  # Guidance scale (15.0 = very strong, 1.0 = none)
-print(f"[4/5] Diffusion ({steps} steps, CFG={cfg_scale}, style={'yes' if context_style is not None else 'no'})...")
+has_guidance = context_style is not None
+guidance_type = "image+prompt" if (has_guidance and user_prompt) else "image" if has_guidance else "prompt" if user_prompt else "none"
+print(f"[4/5] Diffusion ({steps} steps, CFG={cfg_scale}, guidance={guidance_type})...")
 mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
 print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
+
+print(f"  [DEBUG] Starting diffusion loop with {steps} steps")
+print(f"  [DEBUG] Latents shape: {latents.shape}, device: {latents.device}")
+print(f"  [DEBUG] Context shape: {context_style.shape if context_style is not None else 'None'}")
 
 with torch.no_grad():
     for step in tqdm(range(steps), desc="Denoising"):
         t = (steps - step - 1) / steps
         t_idx = int(t * 1000)
         t_tensor = torch.full((latents.shape[0],), t_idx, device=device, dtype=torch.long)
+
         # Use style-encoded context if available, otherwise random
         if context_style is not None:
             context = context_style
         else:
             context = torch.randn(latents.shape[0], 256, 4096, dtype=torch.bfloat16, device=device)
+
+        if step == 0:
+            print(f"  [DEBUG] Step {step}: t={t:.3f}, t_idx={t_idx}, context shape={context.shape}, device={context.device}")
 
         # Conditional forward pass (with context)
         output_cond = dit(latents, t_tensor, context)
@@ -441,8 +524,16 @@ with torch.no_grad():
         # Apply Classifier-Free Guidance
         model_output = output_uncond + cfg_scale * (output_cond - output_uncond)
 
+        if step == 0:
+            print(f"  [DEBUG] Step {step}: output shapes: cond={output_cond.shape}, uncond={output_uncond.shape}, final={model_output.shape}")
+
         sigma = np.sqrt(t / (1 - t)) if t > 0 else 0
         latents = latents + model_output * (-sigma * 0.1)
+
+        if step == 0 or step == steps - 1:
+            mem_diffusion = torch.cuda.memory_allocated() / 1e9
+            print(f"  [DEBUG] Step {step}: latents updated, memory: {mem_diffusion:.1f}GB")
+
         torch.cuda.empty_cache()
 
 # Move model back to CPU to free GPU
