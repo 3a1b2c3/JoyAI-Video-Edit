@@ -44,34 +44,24 @@ try:
             print(f"    {k}: {v.shape} {v.dtype}")
     print()
 
-    # Try vision encoder
-    print("Testing vision encoder...")
+    # Test full model forward with image tokens
+    print("Testing full model with image tokens...")
+    prompt_text = "Describe the visual style of this image.\n<|vision_start|><|image_pad|><|vision_end|>"
+
+    inputs = processor(text=prompt_text, images=[style_img], return_tensors="pt")
+    print(f"  Processor output keys: {list(inputs.keys())}")
+
     with torch.no_grad():
-        if hasattr(model, 'visual'):
-            vision_model = model.visual
-            print("  Using model.visual")
-        else:
-            vision_model = model.model.vision_model
-            print("  Using model.model.vision_model")
+        outputs = model(**{k: v.to('cpu') for k, v in inputs.items()}, output_hidden_states=True)
+        embeddings = outputs.hidden_states[-1]
 
-        pixel_values = inputs['pixel_values'].to('cpu')
-        print(f"  pixel_values shape: {pixel_values.shape}")
-
-        image_features = vision_model(pixel_values)
-        print(f"  vision_model output type: {type(image_features)}")
-
-        if hasattr(image_features, 'last_hidden_state'):
-            image_emb = image_features.last_hidden_state
-        else:
-            image_emb = image_features[0] if isinstance(image_features, tuple) else image_features
-
-        print(f"  ✓ Image embedding shape: {image_emb.shape} dtype: {image_emb.dtype}")
+        print(f"  ✓ Embeddings shape: {embeddings.shape} dtype: {embeddings.dtype}")
         print()
         print(f"  Embedding stats:")
-        print(f"    mean: {image_emb.mean():.6f}")
-        print(f"    std:  {image_emb.std():.6f}")
-        print(f"    min:  {image_emb.min():.6f}")
-        print(f"    max:  {image_emb.max():.6f}")
+        print(f"    mean: {embeddings.mean():.6f}")
+        print(f"    std:  {embeddings.std():.6f}")
+        print(f"    min:  {embeddings.min():.6f}")
+        print(f"    max:  {embeddings.max():.6f}")
         print()
 
     print("✅ Image encoding successful!")
