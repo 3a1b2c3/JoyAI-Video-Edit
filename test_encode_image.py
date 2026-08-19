@@ -48,15 +48,9 @@ try:
     print("Testing full model with image tokens...")
     prompt_text = "Describe the visual style of this image.\n<|vision_start|><|image_pad|><|vision_end|>"
 
-    try:
-        inputs = processor(text=prompt_text, images=[style_img], return_tensors="pt")
-        print(f"  ✓ Processor output keys: {list(inputs.keys())}")
-    except TypeError as e:
-        # Fallback: try without explicit text parameter
-        print(f"  Processor error with text param: {e}")
-        print("  Trying with explicit format...")
-        inputs = processor(images=[style_img], return_tensors="pt")
-        print(f"  ✓ Processor output keys: {list(inputs.keys())}")
+    # Processor REQUIRES text parameter
+    inputs = processor(text=prompt_text, images=[style_img], return_tensors="pt")
+    print(f"  ✓ Processor output keys: {list(inputs.keys())}")
 
     with torch.no_grad():
         outputs = model(**{k: v.to('cpu') for k, v in inputs.items()}, output_hidden_states=True)
