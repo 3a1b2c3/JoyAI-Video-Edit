@@ -151,18 +151,27 @@ def encode_image(style_image_path, qwen_processor, qwen_model, vae, device):
     style_img = Image.open(style_image_path).convert("RGB")
     print(f"  ✓ Loaded {style_image_path} ({style_img.size})")
 
-    # Use pipeline's encoder
-    pipeline = Pipeline(vae=vae, text_encoder=qwen_model, tokenizer=None, transformer=None, scheduler=None)
-    pipeline.qwen_processor = qwen_processor
+    # Encode directly with image token markers
+    prompt_text = "Describe the visual style, colors, atmosphere, and artistic composition of this image.\n<|vision_start|><|image_pad|><|vision_end|>"
 
-    prompt_embeds, _ = pipeline.encode_prompt_multiple_images(
-        prompt=["Describe the visual style, colors, atmosphere, and artistic composition of this image."],
-        images=[style_img],
-        device="cpu",
-        max_sequence_length=256
-    )
+    inputs = qwen_processor(text=prompt_text, images=[style_img], return_tensors="pt")
 
-    context = prompt_embeds.to(device).to(torch.bfloat16)
+    with torch.no_grad():
+        outputs = qwen_model(**{k: v.to("cpu") for k, v in inputs.items()}, output_hidden_states=True)
+        prompt_embeds = outputs.hidden_states[-1]
+
+    # Trim/pad to [1, 256, 4096]
+    seq_len = prompt_embeds.shape[1]
+    if seq_len >= 256:
+        context = prompt_embeds[:, :256, :]
+    else:
+        pad_size = 256 - seq_len
+        context = torch.cat([
+            prompt_embeds,
+            torch.zeros(1, pad_size, prompt_embeds.shape[-1], device=prompt_embeds.device)
+        ], dim=1)
+
+    context = context.to(device).to(torch.bfloat16)
     print(f"  ✓ Context shape: {context.shape}")
     print()
 

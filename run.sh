@@ -403,24 +403,34 @@ try:
     style_img = Image.open(style_image_path).convert("RGB")
     print(f"  ✓ Loaded image: {style_image_path} ({style_img.size})")
 
-    # Create temporary pipeline instance for encode_prompt_multiple_images
-    pipeline = Pipeline(vae=vae, text_encoder=qwen_model, tokenizer=None, transformer=None, scheduler=None)
-    pipeline.qwen_processor = qwen_processor
+    # Encode directly with image token markers (like pipeline.py does)
+    prompt_text = "Describe the visual style, colors, atmosphere, and artistic composition of this image.\n<|vision_start|><|image_pad|><|vision_end|>"
 
-    # Use pipeline's encode_prompt_multiple_images (reuse existing code)
-    prompt = ["Describe the visual style, colors, atmosphere, and artistic composition of this image."]
-    prompt_embeds, prompt_embeds_mask = pipeline.encode_prompt_multiple_images(
-        prompt=prompt,
-        images=[style_img],
-        device="cpu",
-        max_sequence_length=256
-    )
+    # Process text + image
+    inputs = qwen_processor(text=prompt_text, images=[style_img], return_tensors="pt")
+    print(f"  [DEBUG] Processor keys: {list(inputs.keys())}")
 
-    print(f"  [DEBUG] Prompt embeds shape: {prompt_embeds.shape}")
+    # Run model forward
+    with torch.no_grad():
+        outputs = qwen_model(**{k: v.to("cpu") for k, v in inputs.items()}, output_hidden_states=True)
+        prompt_embeds = outputs.hidden_states[-1]  # [1, seq_len, 4096]
+
+    print(f"  [DEBUG] Embeddings shape: {prompt_embeds.shape}")
     if prompt_embeds is None or prompt_embeds.shape[0] == 0:
-        raise ValueError(f"Prompt encoding returned empty: {prompt_embeds.shape if prompt_embeds is not None else 'None'}")
+        raise ValueError(f"Encoding returned empty: {prompt_embeds.shape if prompt_embeds is not None else 'None'}")
 
-    context_style = prompt_embeds.to(device).to(torch.bfloat16)
+    # Trim/pad to [1, 256, 4096]
+    seq_len = prompt_embeds.shape[1]
+    if seq_len >= 256:
+        context_style = prompt_embeds[:, :256, :]
+    else:
+        pad_size = 256 - seq_len
+        context_style = torch.cat([
+            prompt_embeds,
+            torch.zeros(1, pad_size, prompt_embeds.shape[-1], device=prompt_embeds.device)
+        ], dim=1)
+
+    context_style = context_style.to(device).to(torch.bfloat16)
     print(f"  ✓ Context shape: {context_style.shape}, dtype: {context_style.dtype}")
 except Exception as e:
     print(f"❌ ERROR: Style encoding failed: {e}")
