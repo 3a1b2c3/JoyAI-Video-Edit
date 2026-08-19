@@ -36,14 +36,6 @@ print()
 # Test encoding
 print("[3/3] Testing image encoding...")
 try:
-    # Process image (text=empty)
-    inputs = processor(images=[style_img], return_tensors="pt")
-    print(f"✓ Processor output:")
-    for k, v in inputs.items():
-        if hasattr(v, 'shape'):
-            print(f"    {k}: {v.shape} {v.dtype}")
-    print()
-
     # Test full model forward with image tokens
     print("Testing full model with image tokens...")
     prompt_text = "Describe the visual style of this image.\n<|vision_start|><|image_pad|><|vision_end|>"
