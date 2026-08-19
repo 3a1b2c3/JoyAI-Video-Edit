@@ -117,26 +117,41 @@ fi
 echo "✓ Output directory ready: $OUTPUT_DIR"
 echo ""
 
-# Run inference
+# Run inference via infer.py
 echo "Running inference..."
 echo "  Frames: $FRAMES"
 echo "  Resolution: ${HEIGHT}x${WIDTH}"
 echo "  Steps: $STEPS"
 echo ""
 
-# Export args as env vars for Python
-export JOYAI_VIDEO="$VIDEO"
-export JOYAI_OUTPUT="$OUTPUT"
-export JOYAI_REF_IMAGE="$REF_IMAGE"
-export JOYAI_FRAMES="$FRAMES"
-export JOYAI_HEIGHT="$HEIGHT"
-export JOYAI_WIDTH="$WIDTH"
-export JOYAI_STEPS="$STEPS"
-export JOYAI_CFG="$CFG"
-export JOYAI_PROMPT="$PROMPT"
+# Build command for infer.py (pass height/width only if not auto)
+set -- "$PYTHON" "-u" "infer.py" "$VIDEO" "--output" "$OUTPUT" "--style" "$REF_IMAGE" "--frames" "$FRAMES" "--steps" "$STEPS" "--cfg" "$CFG"
 
-# Load models and run diffusion
-$PYTHON -u << 'PYEOF'
+if [ "$HEIGHT" != "auto" ]; then
+    set -- "$@" "--height" "$HEIGHT"
+fi
+if [ "$WIDTH" != "auto" ]; then
+    set -- "$@" "--width" "$WIDTH"
+fi
+
+echo "Running: $@"
+echo ""
+
+"$@"
+INFER_EXIT=$?
+
+if [ $INFER_EXIT -ne 0 ]; then
+    echo "Inference failed (exit code: $INFER_EXIT)"
+    exit $INFER_EXIT
+fi
+
+echo ""
+echo "✅ Done!"
+echo "Output: $OUTPUT_FULL"
+exit 0
+
+# Kept for reference (infer.py replaces this)
+$PYTHON -u << 'PYEOF_UNUSED'
 import os
 import sys
 import gc
@@ -584,14 +599,4 @@ print("=" * 70)
 print("✅ INFERENCE COMPLETE")
 print("=" * 70)
 print(f"Full path: {output_path}")
-PYEOF
-
-PYEOF_EXIT=$?
-if [ $PYEOF_EXIT -ne 0 ]; then
-    echo "Inference failed"
-    exit 1
-fi
-
-echo ""
-echo "✅ Done!"
-echo "Output: $OUTPUT"
+PYEOF_UNUSED
