@@ -83,14 +83,14 @@ fi
 
 # Verify joyomni_ops (fail hard if missing)
 echo "Checking joyomni_ops..."
-if ! OUTPUT=$($PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" 2>&1); then
+if ! JOYOMNI_CHECK=$($PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print('✅ joyomni_ops available')" 2>&1); then
     echo ""
     echo "=========================================="
     echo "❌ FATAL: joyomni_ops import failed"
     echo "=========================================="
     echo ""
     echo "Error output:"
-    echo "$OUTPUT"
+    echo "$JOYOMNI_CHECK"
     echo ""
     echo "joyomni_ops._C.cpython-310-x86_64.pyd must be built first."
     echo ""
@@ -104,7 +104,7 @@ if ! OUTPUT=$($PYTHON -c "from joyomni_ops import fused_norm_scale_shift; print(
     echo ""
     exit 1
 fi
-echo "$OUTPUT"
+echo "$JOYOMNI_CHECK"
 echo ""
 
 # Create output directory
