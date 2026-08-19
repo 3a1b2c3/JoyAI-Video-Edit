@@ -404,7 +404,7 @@ try:
     print(f"  ✓ Loaded image: {style_image_path} ({style_img.size})")
 
     # Create temporary pipeline instance for encode_prompt_multiple_images
-    pipeline = Pipeline(vae=None, text_encoder=qwen_model, tokenizer=None, transformer=None, scheduler=None)
+    pipeline = Pipeline(vae=vae, text_encoder=qwen_model, tokenizer=None, transformer=None, scheduler=None)
     pipeline.qwen_processor = qwen_processor
 
     # Use pipeline's encode_prompt_multiple_images (reuse existing code)
