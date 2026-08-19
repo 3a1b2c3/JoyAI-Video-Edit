@@ -77,6 +77,11 @@ https://github.com/user-attachments/assets/bca232c9-75df-46f9-b366-14cfa2651994
   </tr>
 </table>
 
+**RV2V:** Put the coat/dress/shirt ... from Image 1 on the model in the video
+
+https://github.com/user-attachments/assets/e887d087-af71-4de1-b5d3-bbfbd32922d8
+
+
 ## 📦 Model Download
 
 Download the released JoyAI-Video-Edit weights from [Hugging Face](https://huggingface.co/jdopensource/JoyAI-Video-Edit), then place them under:
