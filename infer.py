@@ -8,6 +8,7 @@ import os
 import sys
 import gc
 import argparse
+import traceback
 from pathlib import Path
 
 # Setup paths
@@ -22,7 +23,6 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 import imageio.v3 as iio
-import traceback as tb_module
 
 sys.path.insert(0, './deploy')
 
@@ -48,7 +48,7 @@ def show_error(exc_type, exc_value, exc_traceback):
     print(f"\n{'='*70}")
     print(f"❌ UNHANDLED ERROR: {exc_type.__name__}")
     print(f"{'='*70}")
-    tb_module.print_exception(exc_type, exc_value, exc_traceback)
+    traceback.print_exception(exc_type, exc_value, exc_traceback)
     sys.exit(1)
 
 sys.excepthook = show_error
@@ -141,208 +141,381 @@ def load_models(device):
     return dit, vae, qwen_processor, qwen_model
 
 
-def encode_image_context(style_path, processor, text_encoder, device):
+def encode_image_context(style_path, qwen_processor, qwen_model, device):
     """Encode style image to context embeddings"""
-    if processor is None or text_encoder is None:
-        return None
+    if not Path(style_path).exists():
+        print(f"❌ ERROR: Style image not found: {style_path}")
+        sys.exit(1)
+
+    if qwen_processor is None or qwen_model is None:
+        print(f"❌ ERROR: Qwen2.5-VL encoder not available (failed to load)")
+        sys.exit(1)
+
+    print(f"[3.5/5] Encoding style image with Qwen2.5-VL...")
 
     try:
-        img = Image.open(style_path).convert("RGB")
-        prompt = "Describe the visual style, colors, atmosphere, and artistic composition.\n<|vision_start|><|image_pad|><|vision_end|>"
+        # Load image
+        style_img = Image.open(style_path).convert("RGB")
+        print(f"  ✓ Loaded image: {style_path} ({style_img.size})")
 
-        inputs = processor(text=prompt, images=[img], return_tensors="pt")
+        # Encode directly with image token markers
+        prompt_text = "Describe the visual style, colors, atmosphere, and artistic composition of this image.\n<|vision_start|><|image_pad|><|vision_end|>"
+
+        # Process text + image
+        inputs = qwen_processor(text=prompt_text, images=[style_img], return_tensors="pt")
+        print(f"  [DEBUG] Processor keys: {list(inputs.keys())}")
+
+        # Run model forward
         with torch.no_grad():
-            outputs = text_encoder(**{k: v.to("cpu") for k, v in inputs.items()}, output_hidden_states=True)
-            context = outputs.hidden_states[-1]  # [1, seq_len, hidden_dim]
+            outputs = qwen_model(**{k: v.to("cpu") for k, v in inputs.items()}, output_hidden_states=True)
+            prompt_embeds = outputs.hidden_states[-1]
 
-        # Project to 4096 if needed
-        if context.shape[-1] != 4096:
-            proj = torch.nn.Linear(context.shape[-1], 4096, dtype=context.dtype, device="cpu")
+        print(f"  [DEBUG] Embeddings shape: {prompt_embeds.shape}")
+        if prompt_embeds is None or prompt_embeds.shape[0] == 0:
+            raise ValueError(f"Encoding returned empty: {prompt_embeds.shape if prompt_embeds is not None else 'None'}")
+
+        # Get embedding dimension
+        emb_dim = prompt_embeds.shape[-1]
+        print(f"  [DEBUG] Embedding dim: {emb_dim}")
+
+        # Project 3584 → 4096 if needed
+        if emb_dim != 4096:
+            print(f"  [DEBUG] Projecting {emb_dim} → 4096 (dtype: {prompt_embeds.dtype})")
+            proj = torch.nn.Linear(emb_dim, 4096, dtype=prompt_embeds.dtype, device="cpu")
             with torch.no_grad():
-                context = proj(context)
+                prompt_embeds = proj(prompt_embeds)
+            print(f"  [DEBUG] After projection: {prompt_embeds.shape}")
 
         # Trim/pad to [1, 256, 4096]
-        if context.shape[1] >= 256:
-            context = context[:, :256, :]
+        seq_len = prompt_embeds.shape[1]
+        if seq_len >= 256:
+            context_style = prompt_embeds[:, :256, :]
         else:
-            pad = torch.zeros(1, 256 - context.shape[1], 4096, dtype=context.dtype)
-            context = torch.cat([context, pad], dim=1)
+            pad_size = 256 - seq_len
+            context_style = torch.cat([
+                prompt_embeds,
+                torch.zeros(1, pad_size, 4096, device=prompt_embeds.device)
+            ], dim=1)
 
-        return context.to(device).to(torch.bfloat16)
+        context_style = context_style.to(device).to(torch.bfloat16)
+        print(f"  ✓ Context shape: {context_style.shape}, dtype: {context_style.dtype}")
+        return context_style
     except Exception as e:
-        print(f"  ⚠ Image encoding failed: {e}")
-        return None
+        print(f"❌ ERROR: Style encoding failed: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 
-def load_video(path, num_frames, height, width):
+def load_video(video_path, num_frames, height, width):
     """Load video frames"""
-    cap = cv2.VideoCapture(path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frames = []
+    print(f"[1/5] Loading video: {video_path}")
+    if not Path(video_path).exists():
+        print(f"ERROR: Video not found: {video_path}")
+        sys.exit(1)
 
-    for _ in range(num_frames):
-        ret, bgr = cap.read()
-        if not ret:
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    frames_to_load = total_frames if num_frames == "all" else int(num_frames)
+
+    # Auto-size to source aspect ratio when H/W aren't given explicitly
+    auto_size = height is None or width is None
+    if auto_size:
+        src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 16
+        src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 16
+        ar = src_w / src_h
+        _snap = lambda x: max(16, int(round(x / 16)) * 16)
+        BASE = 256
+        if ar >= 1:  # landscape
+            width, height = BASE, _snap(BASE / ar)
+        else:  # portrait
+            height, width = BASE, _snap(BASE * ar)
+        print(f"  Auto resolution from {src_w}x{src_h} (AR {ar:.3f}) -> {width}x{height}")
+
+    frames = []
+    for i in range(min(frames_to_load, total_frames)):
+        ok, bgr = cap.read()
+        if not ok:
             break
 
-        # Letterbox
-        h, w = bgr.shape[:2]
-        aspect = w / h
-        if aspect > width / height:
-            nw, nh = width, int(width / aspect)
+        if auto_size:
+            # aspect already matched -> plain resize, no letterbox padding
+            bgr_out = cv2.resize(bgr, (width, height))
         else:
-            nh, nw = height, int(height * aspect)
+            # explicit H/W -> letterbox to preserve aspect inside that box
+            orig_h, orig_w = bgr.shape[:2]
+            aspect = orig_w / orig_h
+            if aspect > width / height:
+                new_w, new_h = width, int(width / aspect)
+            else:
+                new_h, new_w = height, int(height * aspect)
+            bgr_resized = cv2.resize(bgr, (new_w, new_h))
+            pad_t, pad_b = (height - new_h) // 2, height - new_h - (height - new_h) // 2
+            pad_l, pad_r = (width - new_w) // 2, width - new_w - (width - new_w) // 2
+            bgr_out = cv2.copyMakeBorder(bgr_resized, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=(0,0,0))
 
-        bgr = cv2.resize(bgr, (nw, nh))
-        pt, pb = (height - nh) // 2, height - nh - (height - nh) // 2
-        pl, pr = (width - nw) // 2, width - nw - (width - nw) // 2
-        bgr = cv2.copyMakeBorder(bgr, pt, pb, pl, pr, cv2.BORDER_CONSTANT)
-
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(bgr_out, cv2.COLOR_BGR2RGB)
         frames.append(torch.from_numpy(rgb).float() / 255.0)
 
     cap.release()
-    return torch.stack(frames).to("cuda", dtype=torch.bfloat16), fps
+
+    frames_tensor = torch.stack(frames).to("cuda", dtype=torch.bfloat16)
+    print(f"✓ Loaded {len(frames)} frames @ {fps:.1f} fps")
+    print()
+
+    return frames_tensor, fps
 
 
-def vae_encode(frames, vae):
+def vae_encode(frames_tensor, vae, device):
     """Encode frames to latents"""
-    with torch.no_grad():
-        frames_chw = frames.permute(0, 3, 1, 2).to("cpu")
-        latents = []
-
-        for i in tqdm(range(len(frames_chw)), desc="VAE encode"):
-            z = frames_chw[i:i+1].unsqueeze(2)
-            posterior = vae.encode(z).latent_dist
-            sample = posterior.sample() * 0.18215
-            latents.append(sample.to("cuda"))
-            torch.cuda.empty_cache()
-
-        return torch.cat(latents, dim=0)
-
-
-def diffusion(dit, latents, context, steps, cfg_scale, device):
-    """Diffusion with CFG"""
-    # Broadcast context to batch size
-    if context is not None and context.shape[0] == 1 and latents.shape[0] > 1:
-        context = context.repeat(latents.shape[0], 1, 1)
+    print("[3/5] VAE encoding...")
+    mem_before_encode = torch.cuda.memory_allocated() / 1e9
+    print(f"  Memory before encoding: {mem_before_encode:.1f}GB")
+    print(f"  [DEBUG] frames_tensor: {frames_tensor.shape} {frames_tensor.dtype} on {frames_tensor.device}")
 
     with torch.no_grad():
-        for step in tqdm(range(steps), desc="Diffusion"):
+        frames_chw = frames_tensor.permute(0, 3, 1, 2)
+        print(f"  [DEBUG] After permute: {frames_chw.shape}")
+        frames_chw = frames_chw.to("cpu")
+        print(f"  [DEBUG] Moved to CPU: {frames_chw.device}")
+
+        latents_list = []
+        for i in tqdm(range(len(frames_chw)), desc="Encoding"):
+            try:
+                z = frames_chw[i:i+1].unsqueeze(2)
+                print(f"  [DEBUG] Frame {i}: z shape={z.shape} on {z.device}")
+                posterior = vae.encode(z).latent_dist
+                sample = posterior.sample() * 0.18215
+                print(f"  [DEBUG] Frame {i}: latent shape={sample.shape}")
+                latents_list.append(sample)
+            except Exception as e:
+                print(f"  ⚠ Frame {i} encode error: {e}")
+                traceback.print_exc()
+                continue
+
+        print(f"  [DEBUG] Encoded {len(latents_list)} frames successfully")
+        if latents_list:
+            latents = torch.cat(latents_list, dim=0)
+            print(f"  [DEBUG] Concatenated latents: {latents.shape}")
+        else:
+            print("  WARNING: latents_list empty, using raw frames")
+            latents = frames_chw[:1]
+
+        # Move latents to GPU for diffusion
+        print(f"  [DEBUG] Moving latents to GPU...")
+        latents = latents.to("cuda")
+        print(f"  [DEBUG] Latents on GPU: {latents.shape} {latents.dtype} on {latents.device}")
+
+        gc.collect()
+        torch.cuda.empty_cache()
+        mem_after_encode = torch.cuda.memory_allocated() / 1e9
+        print(f"✓ Encoded {len(latents)} frames")
+        print(f"  Memory: {mem_after_encode:.1f}GB ({mem_after_encode - mem_before_encode:+.1f}GB)")
+
+    print()
+    return latents
+
+
+def diffusion(dit, latents, context_style, steps, cfg_scale, device):
+    """Diffusion with Classifier-Free Guidance"""
+    # Repeat context to match latent batch size
+    if context_style is not None:
+        batch_size = latents.shape[0]
+        if context_style.shape[0] == 1 and batch_size > 1:
+            context_style = context_style.repeat(batch_size, 1, 1)
+            print(f"  [DEBUG] Repeated context to batch size {batch_size}: {context_style.shape}")
+
+    guidance_mode = "style" if context_style is not None else "random"
+    print(f"[4/5] Diffusion ({steps} steps, CFG={cfg_scale}, context={guidance_mode})...")
+    mem_before_diffusion = torch.cuda.memory_allocated() / 1e9
+    print(f"  Memory before diffusion: {mem_before_diffusion:.1f}GB")
+
+    print(f"  [DEBUG] Starting diffusion loop with {steps} steps")
+    print(f"  [DEBUG] Latents shape: {latents.shape}, device: {latents.device}")
+    print(f"  [DEBUG] Context shape: {context_style.shape if context_style is not None else 'None'}")
+
+    with torch.no_grad():
+        for step in tqdm(range(steps), desc="Denoising"):
             t = (steps - step - 1) / steps
             t_idx = int(t * 1000)
             t_tensor = torch.full((latents.shape[0],), t_idx, device=device, dtype=torch.long)
 
-            # Conditional
-            out_cond = dit(latents, t_tensor, context)
-            if isinstance(out_cond, (tuple, list)):
-                out_cond = out_cond[0]
-
-            # Unconditional
-            ctx_uncond = torch.zeros_like(context) if context is not None else None
-            out_uncond = dit(latents, t_tensor, ctx_uncond)
-            if isinstance(out_uncond, (tuple, list)):
-                out_uncond = out_uncond[0]
-
-            # CFG blend
-            if context is not None:
-                output = out_uncond + cfg_scale * (out_cond - out_uncond)
+            # Use style-encoded context if available, otherwise random
+            if context_style is not None:
+                context = context_style
             else:
-                output = out_cond
+                context = torch.randn(latents.shape[0], 256, 4096, dtype=torch.bfloat16, device=device)
+
+            if step == 0:
+                print(f"  [DEBUG] Step {step}: t={t:.3f}, t_idx={t_idx}, context shape={context.shape}, device={context.device}")
+
+            # Conditional forward pass (with context)
+            output_cond = dit(latents, t_tensor, context)
+            if isinstance(output_cond, (tuple, list)):
+                output_cond = output_cond[0]
+
+            # Unconditional forward pass (empty context for CFG)
+            context_uncond = torch.zeros_like(context)
+            output_uncond = dit(latents, t_tensor, context_uncond)
+            if isinstance(output_uncond, (tuple, list)):
+                output_uncond = output_uncond[0]
+
+            # Apply Classifier-Free Guidance
+            model_output = output_uncond + cfg_scale * (output_cond - output_uncond)
+
+            if step == 0:
+                print(f"  [DEBUG] Step {step}: output shapes: cond={output_cond.shape}, uncond={output_uncond.shape}, final={model_output.shape}")
 
             sigma = np.sqrt(t / (1 - t)) if t > 0 else 0
-            latents = latents + output * (-sigma * 0.1)
+            latents = latents + model_output * (-sigma * 0.1)
+
+            if step == 0 or step == steps - 1:
+                mem_diffusion = torch.cuda.memory_allocated() / 1e9
+                print(f"  [DEBUG] Step {step}: latents updated, memory: {mem_diffusion:.1f}GB")
+
             torch.cuda.empty_cache()
+
+    # Move model back to CPU to free GPU
+    dit.to("cpu")
+    gc.collect()
+    torch.cuda.empty_cache()
+    gc.collect()
+    torch.cuda.empty_cache()
+    mem_after_diffusion = torch.cuda.memory_allocated() / 1e9
+    print(f"✓ Diffusion complete")
+    print(f"  Memory: {mem_after_diffusion:.1f}GB ({mem_after_diffusion - mem_before_diffusion:+.1f}GB)")
+    print()
 
     return latents
 
 
-def vae_decode(latents, vae):
+def vae_decode(latents, vae, device):
     """Decode latents to frames"""
+    print("[5/5] Decoding...")
+    mem_before_decode = torch.cuda.memory_allocated() / 1e9
+    print(f"  Memory before decoding: {mem_before_decode:.1f}GB")
+
     with torch.no_grad():
-        frames = []
-        for i in tqdm(range(len(latents)), desc="VAE decode"):
-            z = latents[i:i+1].to("cpu") / 0.18215
-            frame = vae.decode(z).sample
-            frames.append(frame.to("cuda"))
-            torch.cuda.empty_cache()
+        latents_decoded = latents / 0.18215
+        # Move to CPU if VAE is on CPU (device mismatch fix)
+        if str(vae.device) == 'cpu':
+            latents_decoded = latents_decoded.to("cpu")
+        frames_decoded = []
+        for i in tqdm(range(len(latents_decoded)), desc="Decoding"):
+            try:
+                frame = vae.decode(latents_decoded[i:i+1]).sample
+                # Ensure output is on GPU if we need it there
+                frame = frame.to(device)
+                frames_decoded.append(frame)
+                torch.cuda.empty_cache()
+            except Exception as e:
+                print(f"Frame {i}: {e}")
+                traceback.print_exc()
+                continue
 
-        return torch.cat(frames, dim=0)
+        decoded = torch.cat(frames_decoded, dim=0) if frames_decoded else latents_decoded[:1]
+        gc.collect()
+        torch.cuda.empty_cache()
+        mem_after_decode = torch.cuda.memory_allocated() / 1e9
+        print(f"✓ Decoded {len(decoded)} frames")
+        print(f"  Memory: {mem_after_decode:.1f}GB ({mem_after_decode - mem_before_decode:+.1f}GB)")
+        print()
+
+    return decoded
 
 
-def save_video(frames, path, fps):
+def save_video(decoded, output_path, fps):
     """Save frames to MP4"""
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    output_path = str(Path(output_path).resolve())  # absolute path (cwd = script dir)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    if frames.ndim == 5:
-        frames = frames.squeeze(2)
+    try:
+        # Handle different shape formats
+        if decoded.ndim == 5:
+            decoded = decoded.squeeze(2)  # (B, C, 1, H, W) -> (B, C, H, W)
+        if decoded.ndim == 4:
+            # (B, C, H, W) -> (B, H, W, C) for video
+            decoded = decoded.permute(0, 2, 3, 1)
 
-    output = (frames.float().permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
-    iio.imwrite(path, output, fps=fps)
-    print(f"✓ Saved: {path}")
+        # Normalize to uint8
+        output_frames = (decoded.to(torch.float32) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
+        print(f"  Saving {len(output_frames)} frames...")
+        iio.imwrite(output_path, output_frames, fps=fps)
+        print(f"\n✓ Output saved:")
+        print(f"  {output_path}")
+    except Exception as e:
+        print(f"\n❌ ERROR saving output: {e}", flush=True)
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.exit(1)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("video", help="Input video")
-    parser.add_argument("--output", default="output.mp4", help="Output video")
+    parser.add_argument("--output", default="outputs/dit_output.mp4", help="Output video")
     parser.add_argument("--style", default="assets/image.png", help="Style image")
     parser.add_argument("--frames", type=int, default=10, help="Frames to process")
-    parser.add_argument("--height", type=int, default=256, help="Height")
-    parser.add_argument("--width", type=int, default=256, help="Width")
+    parser.add_argument("--height", type=int, default=None, help="Height (None=auto)")
+    parser.add_argument("--width", type=int, default=None, help="Width (None=auto)")
     parser.add_argument("--steps", type=int, default=20, help="Diffusion steps")
     parser.add_argument("--cfg", type=float, default=7.5, help="CFG scale")
     args = parser.parse_args()
 
+    print("=" * 70)
+    print("JoyAI-Video-Edit Inference (using joyomni_ops CUDA kernels)")
+    print("=" * 70)
+    print()
+
     seed_everything(42)
     device = torch.device("cuda")
-
-    print("=" * 60)
-    print("JoyAI-Video-Edit Inference")
-    print("=" * 60)
+    print(f"Device: {device}")
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"Compute Capability: {torch.cuda.get_device_capability(0)}")
+    print(f"VRAM Total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
+    mem_info("Start")
     print()
 
     # Load models
-    dit, vae, processor, text_encoder = load_models(device)
-    print()
-
-    # Encode style
-    if Path(args.style).exists():
-        print(f"[Style] Encoding {args.style}...")
-        context = encode_image_context(args.style, processor, text_encoder, device)
-        print()
-    else:
-        print("[Style] Not found, using random")
-        context = None
-        print()
+    dit, vae, qwen_processor, qwen_model = load_models(device)
 
     # Load video
-    print(f"[Video] Loading {args.video}...")
-    frames, fps = load_video(args.video, args.frames, args.height, args.width)
-    print(f"  Loaded {len(frames)} frames @ {fps:.1f} fps")
-    print()
+    frames_tensor, fps = load_video(args.video, args.frames, args.height, args.width)
+
+    # Encode style image
+    context_style = None
+    if Path(args.style).exists():
+        context_style = encode_image_context(args.style, qwen_processor, qwen_model, device)
+    else:
+        print(f"❌ ERROR: Style image not found: {args.style}")
+        sys.exit(1)
+
+    # Repeat context to match latent batch size (will be done in VAE encode)
+    # Note: deferred until after VAE encoding so we know batch size
 
     # Encode VAE
-    print("[VAE] Encoding...")
-    latents = vae_encode(frames, vae)
-    print()
+    latents = vae_encode(frames_tensor, vae, device)
+
+    # Repeat context to match latent batch size
+    if context_style is not None:
+        batch_size = latents.shape[0]
+        if context_style.shape[0] == 1 and batch_size > 1:
+            context_style = context_style.repeat(batch_size, 1, 1)
 
     # Diffusion
-    print(f"[Diffusion] {args.steps} steps, CFG={args.cfg}...")
-    latents = diffusion(dit, latents, context, args.steps, args.cfg, device)
-    print()
+    latents = diffusion(dit, latents, context_style, args.steps, args.cfg, device)
 
     # Decode VAE
-    print("[VAE] Decoding...")
-    decoded = vae_decode(latents, vae)
-    print()
+    decoded = vae_decode(latents, vae, device)
 
     # Save
     save_video(decoded, args.output, fps)
-    print()
-    print("=" * 60)
-    print("✅ Complete")
-    print("=" * 60)
+
+    print("=" * 70)
+    print("✅ INFERENCE COMPLETE")
+    print("=" * 70)
+    print(f"Full path: {Path(args.output).resolve()}")
 
 
 if __name__ == "__main__":
