@@ -444,6 +444,11 @@ try:
 
     context_style = context_style.to(device).to(torch.bfloat16)
     print(f"  ✓ Context shape: {context_style.shape}, dtype: {context_style.dtype}")
+except Exception as e:
+    print(f"❌ ERROR: Style encoding failed: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
 
 # Repeat context to match latent batch size
 if context_style is not None:
@@ -451,11 +456,6 @@ if context_style is not None:
     if context_style.shape[0] == 1 and batch_size > 1:
         context_style = context_style.repeat(batch_size, 1, 1)
         print(f"  [DEBUG] Repeated context to batch size {batch_size}: {context_style.shape}")
-except Exception as e:
-    print(f"❌ ERROR: Style encoding failed: {e}")
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
 
 print()
 
