@@ -162,7 +162,9 @@ save_visual(frame_out, "decoded", "04")
 print()
 
 # Save as MP4
-output_frames = (frame_out.to(torch.float32).permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).cpu().numpy().astype(np.uint8)
+if frame_out.ndim == 5:
+    frame_out = frame_out.squeeze(2)  # [B, C, T, H, W] -> [B, C, H, W]
+output_frames = (frame_out.to(torch.float32).permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).detach().cpu().numpy().astype(np.uint8)
 iio.imwrite("debug_frames/05_output.mp4", output_frames, fps=24)
 print("✓ Saved output.mp4")
 print()
