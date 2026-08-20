@@ -46,7 +46,6 @@ def _env_on(name: str) -> bool:
 
 _FP8_IMG_ENABLED = _env_on("JOYOMNI_FP8_IMG")
 _FP8_TXT_ENABLED = _env_on("JOYOMNI_FP8_TXT")
-_TXT_PARALLEL_ENABLED = _env_on("JOYOMNI_TXT_PARALLEL")
 
 
 def _fp8_stream_wanted(stream: str) -> bool:
@@ -179,30 +178,12 @@ def _flash_attention4(query: torch.Tensor, key: torch.Tensor, value: torch.Tenso
     return _sdpa_attention(query, key, value).to(original_dtype)
 
 
-def warmup_attention_backend(
-    heads_num: int,
-    head_dim: int,
-    device: Optional[torch.device] = None,
-    dtype: torch.dtype = torch.bfloat16,
-    q_len: int = 4096,
-    kv_len: int = 4096,
-) -> None:
-    if device is None:
-        device = torch.device("cuda")
-    try:
-        q = torch.zeros(1, q_len, heads_num, head_dim, device=device, dtype=dtype)
-        k = torch.zeros(1, kv_len, heads_num, head_dim, device=device, dtype=dtype)
-        _flash_attention4(q, k, k)
-        torch.cuda.synchronize(device)
-        if not _FA4_DISABLED:
-            backend = "FA4"
-        elif _sage_attn_func is not None:
-            backend = "sage"
-        else:
-            backend = "cuDNN"
-        logger.warning(f"[{__name__}] attention warmup done via {backend} (q={q_len}, kv={kv_len}, heads={heads_num}, dim={head_dim})")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"[{__name__}] attention warmup failed (will lazily compile in-loop): {exc}")
+def attention_backend() -> str:
+    if not _FA4_DISABLED:
+        return "FA4"
+    if _sage_attn_func is not None:
+        return "sage"
+    return "SDPA (cuDNN/flash)"
 
 
 def _concat_kv_entries(
@@ -343,7 +324,6 @@ class MMDoubleStreamBlock(nn.Module):
         skip_text_stream: bool = False,
         kv_cache_pre_rope: bool = False,
         cached_freqs_cis: Optional[tuple] = None,
-        txt_side_stream: Optional[torch.cuda.Stream] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         _maybe_install_fp8_stream(self, "img")
         _fp8_on = _fp8_stream_enabled(self, "img")
@@ -368,26 +348,6 @@ class MMDoubleStreamBlock(nn.Module):
                 txt_mod2_gate,
             ) = self.txt_mod(vec)
 
-        _txt_par = txt_side_stream is not None and not skip_text_stream
-        if _txt_par:
-            _fork_ev = torch.cuda.Event()
-            _fork_ev.record()
-            with torch.cuda.stream(txt_side_stream):
-                txt_side_stream.wait_event(_fork_ev)
-                txt_modulated = _sgl_fused.fused_layernorm_modulate(
-                    txt, shift=txt_mod1_shift, scale=txt_mod1_scale,
-                    weight=self.txt_norm1.weight if self.txt_norm1.elementwise_affine else None,
-                    bias=self.txt_norm1.bias if self.txt_norm1.elementwise_affine else None,
-                    eps=self.txt_norm1.eps,
-                )
-                txt_qkv = self._fp8_txt_attn_qkv(txt_modulated) if _fp8_txt_on else self.txt_attn_qkv(txt_modulated)
-                _tv = txt_qkv.view(txt_qkv.shape[0], txt_qkv.shape[1], 3, self.heads_num, -1)
-                txt_q, txt_k, txt_v = _tv[:, :, 0], _tv[:, :, 1], _tv[:, :, 2]
-                txt_q = self.txt_attn_q_norm(txt_q).to(txt_v.dtype)
-                txt_k = self.txt_attn_k_norm(txt_k).to(txt_v.dtype)
-                _txt_qkv_ev = torch.cuda.Event()
-                _txt_qkv_ev.record(txt_side_stream)
-
         img_modulated = _sgl_fused.fused_layernorm_modulate(
             img, shift=img_mod1_shift, scale=img_mod1_scale,
             weight=self.img_norm1.weight if self.img_norm1.elementwise_affine else None,
@@ -411,11 +371,7 @@ class MMDoubleStreamBlock(nn.Module):
         if not kv_cache_pre_rope:
             img_k_for_cache = img_k
 
-        if _txt_par:
-            torch.cuda.current_stream().wait_event(_txt_qkv_ev)
-            for _t in (txt_q, txt_k, txt_v):
-                _t.record_stream(torch.cuda.current_stream())
-        elif not skip_text_stream:
+        if not skip_text_stream:
             txt_modulated = _sgl_fused.fused_layernorm_modulate(
                 txt, shift=txt_mod1_shift, scale=txt_mod1_scale,
                 weight=self.txt_norm1.weight if self.txt_norm1.elementwise_affine else None,
@@ -504,15 +460,6 @@ class MMDoubleStreamBlock(nn.Module):
                 txt_mod2_gate,
             )
 
-        if _txt_par:
-            _attn_ev = torch.cuda.Event()
-            _attn_ev.record()
-            with torch.cuda.stream(txt_side_stream):
-                txt_side_stream.wait_event(_attn_ev)
-                txt_out = _txt_tail(txt)
-                _txt_done_ev = torch.cuda.Event()
-                _txt_done_ev.record(txt_side_stream)
-
         img = _sgl_fused.fused_add_gate(
             img, _img_proj_call(img_attn),
             img_mod1_gate,
@@ -528,11 +475,7 @@ class MMDoubleStreamBlock(nn.Module):
             img_mod2_gate,
         )
 
-        if _txt_par:
-            torch.cuda.current_stream().wait_event(_txt_done_ev)
-            txt_out.record_stream(torch.cuda.current_stream())
-            txt = txt_out
-        elif not skip_text_stream:
+        if not skip_text_stream:
             txt = _txt_tail(txt)
 
         return img, txt
@@ -1032,17 +975,6 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
 
         _graph_assembler = getattr(self, "_graph_kv_assembler", None)
         _graph_writer = getattr(self, "_graph_kv_writer", None)
-        _txt_stream = None
-        if (
-            not skip_text_stream
-            and _TXT_PARALLEL_ENABLED
-            and device.type == "cuda"
-            and _graph_assembler is not None
-        ):
-            _txt_stream = getattr(self, "_txt_side_stream", None)
-            if _txt_stream is None:
-                _txt_stream = torch.cuda.Stream(device=device)
-                self._txt_side_stream = _txt_stream
         for layer_idx, block in enumerate(self.double_blocks):
             img, txt = block(
                 img,
@@ -1059,7 +991,6 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
                 skip_text_stream=skip_text_stream,
                 kv_cache_pre_rope=kv_cache_pre_rope,
                 cached_freqs_cis=cached_freqs_cis,
-                txt_side_stream=_txt_stream,
             )
 
         img = self.proj_out(self.norm_out(img))

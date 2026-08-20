@@ -252,14 +252,8 @@ class JoyOmniRuntime:
         dit.requires_grad_(False)
         dit.eval()
 
-        try:
-            from xvideo.models.dit import warmup_attention_backend as _warmup_fa
-            _heads = int(getattr(dit.config, "heads_num", 0) or 0)
-            _hidden = int(getattr(dit.config, "hidden_size", 0) or 0)
-            if _heads > 0 and _hidden > 0:
-                _warmup_fa(_heads, _hidden // _heads, device=device_obj)
-        except Exception as _fa_exc:  # noqa: BLE001
-            print(f"#####[STREAM] FA4 warmup skipped: {_fa_exc!r}")
+        from xvideo.models.dit import attention_backend
+        print(f"#####[STREAM] attention backend: {attention_backend()}", flush=True)
 
         pipeline = load_pipeline(cfg, dit, device_obj)
         pipeline.vae.requires_grad_(False)

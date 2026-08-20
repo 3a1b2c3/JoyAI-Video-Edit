@@ -5,6 +5,7 @@ import asyncio
 import base64
 import io
 import json
+import math
 import os
 import queue
 import sys
@@ -1396,9 +1397,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         fg_stable = max(1, int(round(fg_stable * _fscale)))
                         fg_absent = max(1, int(round(fg_absent * _fscale)))
                         fg_return = max(1, int(round(fg_return * _fscale)))
-                        count_change_frames = max(1, int(round(int(args.person_count_change_frames) * _fscale)))
                         body_flip_frames = max(1, int(round(int(args.person_body_flip_frames) * _fscale)))
-                        person_stride = max(1, int(round(int(args.person_check_stride) * _fscale)))
+                        person_stride = max(1, math.ceil(int(args.person_check_stride) * _fscale))
+                        count_change_checks = max(1, int(round(int(args.person_count_change_frames) * _fscale / person_stride)))
                         gate_move_eps = float(args.face_gate_move_eps) / _fscale
                         gate_state["count"] = 0
                         gate_state["cx"] = None
@@ -1714,8 +1715,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
                     if gate_on and not face_gate_pending:
                         _tick = gate_state.get("person_check_i", 0)
-                        _gfaces, _gfw, _gfh = _detect_gate_faces(frame, onnx_path=args.face_detector_onnx, score_thresh=fg_score)
-                        if _tick == 0 or gate_state.get("absent_hold"):
+                        _fresh = _tick == 0 or gate_state.get("absent_hold")
+                        if _fresh:
+                            _gfaces, _gfw, _gfh = _detect_gate_faces(frame, onnx_path=args.face_detector_onnx, score_thresh=fg_score)
                             gate_state["person_last"] = _person_present(
                                 frame, onnx_path=args.person_detector_onnx, conf=float(args.person_gate_conf))
 
@@ -1767,37 +1769,38 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         if gate_state.get("absent_hold"):
                             return ("__no_person__", gate_state.get("hold_reason", "no_person"))
 
-                        _n = _count_faces_from(
-                            _gfaces, _gfw, _gfh,
-                            count_min_ratio=float(args.count_face_min_ratio))
-                        if gate_state["subject_count"] is None:
-                            gate_state["subject_count"] = _n
-                            gate_state["cand"] = None
-                            gate_state["cand_n"] = 0
-                        elif _n > gate_state["subject_count"]:
-                            if _n == gate_state["cand"]:
-                                gate_state["cand_n"] += 1
-                            else:
-                                gate_state["cand"] = _n
-                                gate_state["cand_n"] = 1
-                            if gate_state["cand_n"] >= count_change_frames:
-                                gate_state["recount"] = True
+                        if _fresh:
+                            _n = _count_faces_from(
+                                _gfaces, _gfw, _gfh,
+                                count_min_ratio=float(args.count_face_min_ratio))
+                            if gate_state["subject_count"] is None:
                                 gate_state["subject_count"] = _n
                                 gate_state["cand"] = None
                                 gate_state["cand_n"] = 0
-                        elif _n < gate_state["subject_count"]:
-                            if _n == gate_state["cand"]:
-                                gate_state["cand_n"] += 1
+                            elif _n > gate_state["subject_count"]:
+                                if _n == gate_state["cand"]:
+                                    gate_state["cand_n"] += 1
+                                else:
+                                    gate_state["cand"] = _n
+                                    gate_state["cand_n"] = 1
+                                if gate_state["cand_n"] >= count_change_checks:
+                                    gate_state["recount"] = True
+                                    gate_state["subject_count"] = _n
+                                    gate_state["cand"] = None
+                                    gate_state["cand_n"] = 0
+                            elif _n < gate_state["subject_count"]:
+                                if _n == gate_state["cand"]:
+                                    gate_state["cand_n"] += 1
+                                else:
+                                    gate_state["cand"] = _n
+                                    gate_state["cand_n"] = 1
+                                if gate_state["cand_n"] >= count_change_checks:
+                                    gate_state["subject_count"] = _n
+                                    gate_state["cand"] = None
+                                    gate_state["cand_n"] = 0
                             else:
-                                gate_state["cand"] = _n
-                                gate_state["cand_n"] = 1
-                            if gate_state["cand_n"] >= count_change_frames:
-                                gate_state["subject_count"] = _n
                                 gate_state["cand"] = None
                                 gate_state["cand_n"] = 0
-                        else:
-                            gate_state["cand"] = None
-                            gate_state["cand_n"] = 0
 
                     if pe_defer and not face_gate_pending:
                         gate_state["pe_anchor"] = frame
@@ -1985,7 +1988,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vae-ckpt", type=str, default=None, help="Override VAE checkpoint dir (else uses the config default).")
     parser.add_argument("--text-encoder-ckpt", type=str, default=None, help="Override text-encoder checkpoint dir (else uses the config default).")
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--vae-device", type=str, default=None)
     parser.add_argument("--vae-encode-device", type=str, default=None)

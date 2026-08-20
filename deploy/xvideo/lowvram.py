@@ -1,10 +1,6 @@
 """Low-VRAM mode helpers (fit the 480p24 streaming server on 32GB GPUs, e.g. RTX 5090).
 
-Independent of this switch, on every card: FP8 twins release their bf16
-originals once installed (~31GiB freed), decode/pseudo VAEs share the encode
-VAE's weight tensors, and DiT checkpoints load with mmap.
-
-Low-VRAM mode (auto below 48GiB effective VRAM) additionally:
+Low-VRAM mode (auto below 48GiB effective VRAM):
   * builds the DiT on CPU and stages it to the GPU block-by-block, quantizing
     each block to FP8 as it lands, so the ~31GiB bf16 model is never GPU-resident;
   * keeps the text encoder in (pinned) CPU RAM via accelerate sequential offload,
