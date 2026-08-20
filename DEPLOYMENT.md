@@ -34,7 +34,7 @@ deploy/
 ├── recordings/            # session recordings (created at runtime; git-ignored)
 └── deps/                  # weights + compile cache — NOT in git
     ├── checkpoints/       # DiT / xVAE / MiMo-VL / onnx detectors (~51G)
-    └── cache*/            # torchinductor / triton / nv_compute (one root per GPU model, §5)
+    └── cache*/            # torchinductor / triton / nv_compute (one root per GPU model, §4)
 ```
 
 > **`deploy/deps/` is git-ignored.** It must exist on disk for the server to
@@ -98,7 +98,7 @@ Then install the attention and kernel dependencies:
   instead of the default stream — without it, upstream SageAttention records
   empty CUDA graphs (kernels escape capture) and the server's graph path
   produces noise. `JOYOMNI_SAGE_ATTN` is the only switch: default `0` → SDPA
-  (cuDNN). Launch with `JOYOMNI_SAGE_ATTN=1` on an RTX 5090 (see §5); leave it
+  (cuDNN). Launch with `JOYOMNI_SAGE_ATTN=1` on an RTX 5090 (see §4); leave it
   unset on RTX PRO 6000 / B200.
 - **flash-attn-4** (`4.0.0b13`, *required on FA4 machines — B200; skip on
   RTX PRO 6000 / 5090, its JIT does not support sm_120*) — provides
@@ -264,22 +264,48 @@ deploy/deps/checkpoints/
 
 ---
 
-## 4. Configure this machine
+## 4. Launch
 
-Every setting is a plain environment variable with a working default; pass
-anything machine-specific inline on the launch command:
+Every setting is a plain environment variable with a working default. The
+launcher activates conda itself (`JOYOMNI_CONDA_SH` / `JOYOMNI_CONDA_ENV`) and
+runs every stage on one device; when several GPU models share a checkout, each
+gets its own `JOYOMNI_CACHE_ROOT`. UI: `http://<server-ip>:8080/`.
+
+**NVIDIA B200 — 720p @ 30 FPS:**
 
 ```bash
-# the launcher activates conda itself when given the env (works from any shell):
-JOYOMNI_CONDA_SH=<conda-root>/etc/profile.d/conda.sh \
+JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
+JOYOMNI_CONDA_ENV=joyai-video-edit \
+JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_b200 \
+JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=30 \
+bash deploy/run_server.sh
+```
+
+**RTX PRO 6000 — 480p @ 24 FPS:**
+
+```bash
+JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
 JOYOMNI_CONDA_ENV=joyai-video-edit \
 bash deploy/run_server.sh
+```
 
-# or omit both and run inside an already-activated env:
+**RTX PRO 6000 — 720p @ 16 FPS:**
+
+```bash
+JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
+JOYOMNI_CONDA_ENV=joyai-video-edit \
+JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=16 \
 bash deploy/run_server.sh
+```
 
-# optional prompt enhancement (no default; off when unset):
-PE_MODEL=<model> OPENAI_BASE_URL=<url> OPENAI_API_KEY=<key> bash deploy/run_server.sh
+**RTX 5090 — 480p @ 24 FPS:**
+
+```bash
+JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
+JOYOMNI_CONDA_ENV=joyai-video-edit \
+JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 \
+JOYOMNI_SAGE_ATTN=1 JOYOMNI_VAE_PRECISION=fp16 JOYOMNI_FP8_FAST_ACCUM=1 \
+bash deploy/run_server.sh
 ```
 
 Key variables:
@@ -289,7 +315,7 @@ Key variables:
 | `JOYOMNI_CONDA_SH` / `JOYOMNI_CONDA_ENV` | conda `profile.d/conda.sh` + env name/prefix; the launcher activates it itself. Omit both to use the caller's python. |
 | `JOYOMNI_DEVICE` | CUDA device for all stages (default `cuda:0`). |
 | `JOYOMNI_HOST` / `JOYOMNI_PORT` | bind address (default `0.0.0.0:8080`). |
-| `JOYOMNI_WIDTH` / `JOYOMNI_HEIGHT` / `JOYOMNI_FPS` | Output resolution and frame rate (default `840` / `480` / `24` = 480p @ 24 FPS). Per-GPU presets in §5. |
+| `JOYOMNI_WIDTH` / `JOYOMNI_HEIGHT` / `JOYOMNI_FPS` | Output resolution and frame rate (default `840` / `480` / `24` = 480p @ 24 FPS). Per-GPU commands above. |
 | `JOYOMNI_FP8_IMG` / `JOYOMNI_FP8_TXT` | FP8 image / text paths via `joyomni_ops` (default `1` / `1`). Set both `0` to run bf16 (e.g. a `JOYOMNI_OPS_NO_FP8=1` build). |
 | `JOYOMNI_CUDA_GRAPH` | capture the steady-state chunk loop into a CUDA graph (default `1`; the biggest single speedup). `0` runs eager. |
 | `JOYOMNI_SAGE_ATTN` | SageAttention for all DiT attention (default `0` → SDPA/cuDNN; set `1` on RTX 5090). |
@@ -302,94 +328,7 @@ Key variables:
 
 ---
 
-## 5. Launch
-
-Kernel caches live under `JOYOMNI_CACHE_ROOT` (default `deploy/deps/cache/`).
-When several GPU models serve from one checkout, give each its own root —
-Triton/Inductor autotune results from one GPU model replay slower on another:
-
-```bash
-# RTX PRO 6000 — attention: cuDNN
-bash deploy/run_server.sh
-
-# B200 — attention: FA4
-JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_b200 bash deploy/run_server.sh
-
-# RTX 5090 — sage attention + fast-accum FP8
-JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 JOYOMNI_SAGE_ATTN=1 \
-  JOYOMNI_FP8_FAST_ACCUM=1 bash deploy/run_server.sh
-```
-
-The launcher exports the compile-cache dirs under `JOYOMNI_CACHE_ROOT`, wires
-up the vendored checkpoint paths, and starts the server
-with every stage on a single device (`cuda:0` by default).
-
-Open the UI:
-
-```
-http://<server-ip>:8080/
-```
-
-### Resolution / FPS by GPU
-
-The server defaults to **840×480 @ 24 FPS** (480p). Override per GPU with `JOYOMNI_WIDTH` / `JOYOMNI_HEIGHT` / `JOYOMNI_FPS`:
-
-- **NVIDIA B200** — native 720p @ 24 FPS:
-
-  ```bash
-  JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=24 bash deploy/run_server.sh
-  ```
-
-- **RTX PRO 6000** — 480p @ 24 FPS, or native 720p @ 16 FPS. The [live HuggingFace demo](https://huggingface.co/spaces/wxDai/joyai-video-edit) runs the 480p @ 24 FPS preset on this GPU:
-
-  ```bash
-  # 480p @ 24 FPS
-  JOYOMNI_WIDTH=840 JOYOMNI_HEIGHT=480 JOYOMNI_FPS=24 bash deploy/run_server.sh
-  # native 720p @ 16 FPS
-  JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=16 bash deploy/run_server.sh
-  ```
-
-- **RTX 5090 (32GB)** — 480p @ 24 FPS:
-
-  ```bash
-  JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 JOYOMNI_SAGE_ATTN=1 \
-    JOYOMNI_VAE_PRECISION=fp16 JOYOMNI_FP8_FAST_ACCUM=1 bash deploy/run_server.sh
-  ```
-
----
-
-## 6. Common overrides
-
-Append server flags after the script (forwarded to the Python entry point):
-
-```bash
-bash deploy/run_server.sh --port 7860
-```
-
-Run without FP8 (e.g. `joyomni_ops` built with `JOYOMNI_OPS_NO_FP8=1`) — disable **both** FP8 paths:
-
-```bash
-JOYOMNI_FP8_IMG=0 JOYOMNI_FP8_TXT=0 bash deploy/run_server.sh
-```
-
-Custom checkpoint locations:
-
-```bash
-JOYOMNI_DIT_CKPT=/path/to/joyai_video_edit_dit_0811.pth \
-JOYOMNI_VAE_CKPT=/path/to/vae \
-JOYOMNI_TEXT_ENCODER_CKPT=/path/to/MiMo-VL-7B-RL-2508 \
-bash deploy/run_server.sh
-```
-
-Custom recording directory:
-
-```bash
-JOYOMNI_RECORD_DIR=/path/to/recordings bash deploy/run_server.sh
-```
-
----
-
-## 7. Sanity checks
+## 5. Sanity checks
 
 Files in place:
 
