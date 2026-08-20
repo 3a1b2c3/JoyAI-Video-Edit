@@ -228,26 +228,18 @@ class Pipeline(DiffusionPipeline):
         return prompt_embeds, prompt_embeds_mask
 
     def normalize_latents(self, latent: torch.Tensor):
-        if hasattr(self.vae.config, "latents_mean") and hasattr(self.vae.config, "latents_std"):
-            latents_mean = torch.tensor(self.vae.config.latents_mean).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latents_std = torch.tensor(self.vae.config.latents_std).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latent = (latent - latents_mean) / latents_std
-        else:
-            latent = latent * self.vae.config.scaling_factor
-        return latent
+        latents_mean = torch.tensor(self.vae.config.latents_mean).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        latents_std = torch.tensor(self.vae.config.latents_std).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        return (latent - latents_mean) / latents_std
 
     def denormalize_latents(self, latent: torch.Tensor):
-        if hasattr(self.vae.config, "latents_mean") and hasattr(self.vae.config, "latents_std"):
-            latents_mean = torch.tensor(self.vae.config.latents_mean).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latents_std = torch.tensor(self.vae.config.latents_std).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latent = latent * latents_std + latents_mean
-        else:
-            latent = latent / self.vae.config.scaling_factor
-        return latent
+        latents_mean = torch.tensor(self.vae.config.latents_mean).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        latents_std = torch.tensor(self.vae.config.latents_std).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        return latent * latents_std + latents_mean
 
     def _sample_vae_latents(
         self,

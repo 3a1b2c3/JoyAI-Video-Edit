@@ -866,7 +866,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             _wire_chunk = h264_stream is not None or (
                 encoded_frames and isinstance(encoded_frames[0], (bytes, bytearray))
             )
-            _fps = float(getattr(session_settings, "fps", None) or args.fps or 24.0)
+            _fps = float(args.fps)
             _outstanding = None
             if _wire_chunk and flow["recv"] is not None and (time.time() - flow["at"]) < 5.0:
                 _outstanding = max(0, (frames_out - int(flow.get("base") or 0)) - int(flow["recv"]))

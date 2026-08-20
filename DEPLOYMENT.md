@@ -307,7 +307,7 @@ bash deploy/run_server.sh
 JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
 JOYOMNI_CONDA_ENV=joyai-video-edit \
 JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 \
-JOYOMNI_SAGE_ATTN=1 JOYOMNI_VAE_PRECISION=fp16 JOYOMNI_FP8_FAST_ACCUM=1 \
+JOYOMNI_SAGE_ATTN=1 JOYOMNI_FP8_FAST_ACCUM=1 \
 bash deploy/run_server.sh
 ```
 

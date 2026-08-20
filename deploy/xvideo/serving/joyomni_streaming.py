@@ -1032,9 +1032,6 @@ class JoyOmniV2VStreamingSession:
         if cached_temporal_ids.numel() == 0:
             cached_temporal_ids = None
 
-        self.pipeline.scheduler.set_timesteps(self.settings.num_inference_steps, device=self.device)
-        timesteps_for_chunk = self.pipeline.scheduler.timesteps
-
         runner = self._graph_runner_for_chunk(
             chunk_idx=chunk_idx,
             selected_chunk_ids=selected_chunk_ids,
@@ -1049,6 +1046,9 @@ class JoyOmniV2VStreamingSession:
                 history_chunk_ids=history_chunk_ids,
                 active_chunk_id=active_chunk_id,
             )
+
+        self.pipeline.scheduler.set_timesteps(self.settings.num_inference_steps, device=self.device)
+        timesteps_for_chunk = self.pipeline.scheduler.timesteps
 
         for timestep in timesteps_for_chunk:
             autocast_context = _autocast_ctx(
