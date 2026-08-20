@@ -19,20 +19,22 @@ xVAE pipeline (with face/person presence gating) and streams edited frames back.
 ```
 deploy/
 ├── run_server.sh          # launcher (env-driven)
-├── requirements.txt       # pinned Python deps (SageAttention built separately)
+├── requirements.txt       # pinned Python deps (SageAttention / flash-attn-4 / joyomni_ops built separately, §2)
 ├── sageattention-cudagraph-stream.patch  # stream fix for SageAttention (see §2)
 ├── joyomni_ops/           # in-tree CUDA op library (FP8 GEMM + fused kernels); pip install
 ├── xvideo/                # service code
 │   ├── config.py          # runtime/model config defaults
 │   ├── utils.py           # resize buckets, seeding helpers
-│   ├── inductor_autotune_fix.py  # torch 2.9+ compile-cache fix (see §5)
+│   ├── inductor_autotune_fix.py  # torch 2.9+ compile-cache fix
+│   ├── lowvram.py         # low-VRAM mode (auto below 48 GiB) switches
 │   ├── models/            # dit/, vae/, pipeline, flow-match scheduler, loaders
 │   └── serving/           # FastAPI app, streaming runtime, CUDA-graph runner, prompt-enhancement
 ├── static/index.html      # browser client
 ├── rv2v_reference/        # reference images for the UI
+├── recordings/            # session recordings (created at runtime; git-ignored)
 └── deps/                  # weights + compile cache — NOT in git
     ├── checkpoints/       # DiT / xVAE / MiMo-VL / onnx detectors (~51G)
-    └── cache/             # torchinductor / triton / nv_compute caches
+    └── cache*/            # torchinductor / triton / nv_compute (one root per GPU model, §5)
 ```
 
 > **`deploy/deps/` is git-ignored.** It must exist on disk for the server to
@@ -87,10 +89,7 @@ Then install the attention and kernel dependencies:
   git checkout d1a57a546c3d395b1ffcbeecc66d81db76f3b4b5
   git apply ../../sageattention-cudagraph-stream.patch
   export CUDA_HOME=$CONDA_PREFIX
-  # compile only for this machine's GPU architecture (e.g. B200 -> "10.0",
-  # RTX 5090 / PRO 6000 -> "12.0"); auto-detected from the driver:
-  export TORCH_CUDA_ARCH_LIST=$(python -c "import torch; print('.'.join(map(str, torch.cuda.get_device_capability(0))))")
-  echo "building for arch $TORCH_CUDA_ARCH_LIST"
+  export TORCH_CUDA_ARCH_LIST=12.0
   EXT_PARALLEL=4 NVCC_APPEND_FLAGS="--threads 8" MAX_JOBS=32 python setup.py install
   cd -
   ```
@@ -124,8 +123,8 @@ Then install the attention and kernel dependencies:
   ```bash
   git clone https://github.com/NVIDIA/cutlass.git deploy/tmp/cutlass
   git -C deploy/tmp/cutlass checkout dcf215af
-  # like SageAttention above: build only this machine's arch (default is a
-  # 5-arch fat binary — sm_80..120a — which multiplies compile time ~5x)
+  # build only this machine's arch (the default is a 5-arch fat binary —
+  # sm_80..120a — which multiplies compile time ~5x); auto-detected:
   export JOYOMNI_OPS_CUDA_ARCHS=$(python -c "import torch; cc = torch.cuda.get_device_capability(0); print(f'{cc[0]}{cc[1]}a' if cc[0] >= 10 else f'{cc[0]}{cc[1]}')")
   echo "building joyomni_ops for sm_$JOYOMNI_OPS_CUDA_ARCHS"
   JOYOMNI_OPS_CUTLASS_DIR=$(pwd)/deploy/tmp/cutlass \
@@ -294,6 +293,7 @@ Key variables:
 | `JOYOMNI_FP8_IMG` / `JOYOMNI_FP8_TXT` | FP8 image / text paths via `joyomni_ops` (default `1` / `1`). Set both `0` to run bf16 (e.g. a `JOYOMNI_OPS_NO_FP8=1` build). |
 | `JOYOMNI_CUDA_GRAPH` | capture the steady-state chunk loop into a CUDA graph (default `1`; the biggest single speedup). `0` runs eager. |
 | `JOYOMNI_SAGE_ATTN` | SageAttention for all DiT attention (default `0` → SDPA/cuDNN; set `1` on RTX 5090). |
+| `JOYOMNI_LOW_VRAM` | low-VRAM layout — CPU-staged FP8 DiT load + text-encoder CPU offload (default `auto`: on below 48 GiB; see `deploy/xvideo/lowvram.py`). |
 | `JOYOMNI_TXT_PARALLEL` | run each block's txt branch on a side CUDA stream inside the graph (default `1`). |
 | `JOYOMNI_CKPT_ROOT` | override the checkpoints dir (default `deploy/deps/checkpoints`). |
 | `JOYOMNI_DIT_CKPT` / `JOYOMNI_VAE_CKPT` / `JOYOMNI_TEXT_ENCODER_CKPT` / `JOYOMNI_FACE_ONNX` / `JOYOMNI_PERSON_ONNX` | override individual weight paths (default: derived from `JOYOMNI_CKPT_ROOT`). |
@@ -355,69 +355,6 @@ The server defaults to **840×480 @ 24 FPS** (480p). Override per GPU with `JOYO
   JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 JOYOMNI_SAGE_ATTN=1 \
     JOYOMNI_VAE_PRECISION=fp16 JOYOMNI_FP8_FAST_ACCUM=1 bash deploy/run_server.sh
   ```
-
-  The DiT serves FP8-only (~16 GiB; the bf16 originals are freed once the FP8
-  twins install) and the encode/decode/pseudo VAEs share one set of weights
-  (1.4 GiB). Low-VRAM mode (auto below 48 GiB; force with `JOYOMNI_LOW_VRAM=1/0`)
-  changes two things (see `deploy/xvideo/lowvram.py`):
-
-  | | default (≥ 48 GiB) | low-VRAM |
-  |---|---|---|
-  | DiT load path | bf16 loaded to GPU, quantized to FP8 at first forward (bf16 freed as each block's twins install) | built on CPU, staged to GPU block-by-block as FP8 — the 31 GiB bf16 model is never GPU-resident |
-  | Text encoder (MiMo-VL-7B) | resident on GPU (15.6 GiB) | pinned CPU RAM, streamed through the GPU only during prompt encoding (~0 GiB resident; ~1-3 s per session start / KV reset) |
-
-  Requires `JOYOMNI_FP8_IMG=1` + `JOYOMNI_FP8_TXT=1` (the defaults). Host RAM
-  for the offloaded text encoder: ~32 GiB transient while it loads (the pinned
-  copy is built before the pageable original is released), settling to
-  ~16 GiB pinned; `JOYOMNI_TE_PIN=0` avoids the transient double at the cost
-  of slower H2D staging.
-
-  GeForce cards additionally run all bf16/fp8 tensor ops **with FP32
-  accumulation at half rate** (the pro cards are not derated), so
-  an RTX 5090 launch sets three GeForce-specific knobs explicitly (§5 command;
-  each defaults off):
-
-  | knob (set on 5090) | what it does |
-  |---|---|
-  | `JOYOMNI_CACHE_ROOT=deps/cache_rtx5090` | per-GPU-model kernel caches — Triton/Inductor autotune winners benchmarked on one GPU model are silently slow on another |
-  | `JOYOMNI_SAGE_ATTN=1` | sage (int8) attention for every DiT attention pass — int8 is not derated on GeForce while cuDNN/flash SDPA is (~35% faster at 480p serving shapes) |
-  | `JOYOMNI_FP8_FAST_ACCUM=1` | DiT fp8 linears via a Triton kernel that runs the full-rate fp16-accumulate MMA per 128-wide K-tile and promotes to an fp32 running sum (overflow-safe; operands are range-shifted to 1/16 of the e4m3 range, a pure exponent shift). dit stage 264 ms → 210 ms per 8-frame chunk at 480p |
-
-  Measured on a real RTX 5090 (31.4 GiB visible), synthetic 24 FPS client,
-  `num_inference_steps=2`, `max_temporal_ids=8`, gate/PE off:
-
-  | | 840×480 @ 24 | 1248×720 @ 16 |
-  |---|---|---|
-  | sustained output | **23.8 FPS (keeps up)** | 10.3 FPS (h264 out) |
-  | warm chunk (8 frames) | 315 ms (budget 333 ms) | ~630 ms solo / 813 ms backlogged |
-  | VRAM resident / peak | 21.5 / 27.1 GiB | 26.8 / 31.9 GiB (tight) |
-
-  The same harness on the RTX PRO 6000 measures 28.6 FPS capability at 480p24
-  and 15.2 FPS at 720p16 (h264; 13.8 with MJPEG output), so 480p24 is fully
-  aligned while 720p16 is **not reachable on a single 5090 without quality
-  changes**: the fp8 GEMMs are already at the card's fast-accum ceiling
-  (~460-500 TF vs ~712 TF on the Pro) and make up ~2/3 of the dit stage.
-  Options that do reach ≥16 FPS at 720p: put the VAE stages on a second GPU
-  (`--vae-encode-device cuda:1 --vae-decode-device cuda:1 --vae-pseudo-device
-  cuda:1 --postprocess-device cuda:1` → 13.4 FPS measured, PCIe-bound; needs
-  the per-device stream fix that ships with this change), or trade quality
-  (fewer steps / lower resolution / NVFP4 weights on Blackwell — unvalidated).
-
-> The first launch is slow: PyTorch/Triton/CUDA kernels and the DiT attention
-> path compile and warm up, so keep `deploy/deps/cache/` stable across restarts
-> to reuse the compile artifacts (the cache stores absolute paths — after moving
-> or re-cloning the repo it is rebuilt once). Warm restarts then skip all kernel
-> compilation: `xvideo/inductor_autotune_fix.py` (auto-installed from
-> `vae_compile` / `serve main`) patches torch 2.9-2.11 defects
-> ([pytorch#172819](https://github.com/pytorch/pytorch/issues/172819), partially
-> fixed in 2.12; the remaining `.best_config` ping-pong is patched through 2.13)
-> where kernels restored from the FX-graph cache re-ran coordinate-descent
-> autotuning on every boot — tens of seconds of GPU re-benchmarking, with the
-> `.best_config` files rewritten each time — so the second boot replays
-> everything from `deps/cache/` and warmup is pure model load + cached-artifact
-> deserialization + one eager full-pipeline pass. Set
-> `JOYOMNI_NO_COORDESC_CACHE_FIX=1` to disable the patch if a future torch
-> upgrade changes this code path.
 
 ---
 
