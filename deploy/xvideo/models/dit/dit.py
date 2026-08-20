@@ -59,7 +59,8 @@ def _fp8_stream_wanted(stream: str) -> bool:
 
 def _maybe_install_fp8_stream(block, stream: str) -> None:
     """Quantize the attn qkv/proj + mlp up/down Linears of one stream ("img" or "txt")
-    to FP8. Idempotent per (block, stream); the original bf16 Linears are left in place."""
+    to FP8 and free the bf16 weights (~31GiB across the model). Idempotent per
+    (block, stream); the FP8 twins fully replace the bf16 Linears in forward."""
     if not _fp8_stream_wanted(stream):
         return
     installed_flag = f"_fp8_{stream}_installed"
@@ -90,6 +91,12 @@ def _maybe_install_fp8_stream(block, stream: str) -> None:
     _approx = getattr(gelu_mod, "approximate", "tanh") if gelu_mod is not None else "tanh"
     setattr(block, f"_{stream}_mlp_act",
             lambda x, _a=_approx: torch.nn.functional.gelu(x, approximate=_a))
+    # Biases stay (the Fp8Linear twins share the same tensors); only the
+    # weights are freed. state_dict() of these Linears is dead from here on.
+    for lin in (getattr(block, f"{stream}_attn_qkv"),
+                getattr(block, f"{stream}_attn_proj"),
+                up_lin, down_lin):
+        lin.weight.data = lin.weight.data.new_empty(0)
     setattr(block, installed_flag, True)
 
 
@@ -133,7 +140,6 @@ _FA4_DISABLED = not _FA4_IMPORTED
 _SDPA_BACKENDS = [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
 
 _SAGE_ATTN_ENABLED = _env_on("JOYOMNI_SAGE_ATTN")
-_SAGE_MIN_KV_LEN = 4096
 _sage_attn_func = None
 if _SAGE_ATTN_ENABLED:
     try:
@@ -144,11 +150,7 @@ if _SAGE_ATTN_ENABLED:
 
 
 def _sdpa_attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
-    if (
-        _sage_attn_func is not None
-        and key.shape[1] >= _SAGE_MIN_KV_LEN
-        and query.shape[-1] <= 128
-    ):
+    if _sage_attn_func is not None:
         return _sage_attn_func(query, key, value, tensor_layout="NHD", is_causal=False)
     q = query.transpose(1, 2)
     k = key.transpose(1, 2)
@@ -194,7 +196,7 @@ def warmup_attention_backend(
         torch.cuda.synchronize(device)
         if not _FA4_DISABLED:
             backend = "FA4"
-        elif _sage_attn_func is not None and kv_len >= _SAGE_MIN_KV_LEN:
+        elif _sage_attn_func is not None:
             backend = "sage"
         else:
             backend = "cuDNN"

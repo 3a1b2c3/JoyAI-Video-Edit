@@ -396,7 +396,11 @@ class Pipeline(DiffusionPipeline):
         reference_image_latents: torch.Tensor,
         transformer_dtype: torch.dtype,
     ) -> None:
-        ref_img = reference_image_latents.to(device=self._execution_device, dtype=transformer_dtype)
+        # Not self._execution_device: with the text encoder sequentially
+        # offloaded, DiffusionPipeline.device can pick the offloaded module
+        # (meta device). The prefill runs on `model`, so use its device.
+        model_device = next(model.parameters()).device
+        ref_img = reference_image_latents.to(device=model_device, dtype=transformer_dtype)
         ref_frames = ref_img.shape[2]
         with model.cache_context("cond"):
             model(

@@ -2055,6 +2055,9 @@ def main() -> None:
     from xvideo.inductor_autotune_fix import install as _install_autotune_fix
     _install_autotune_fix()
     args = parse_args()
+    # JOYOMNI_VRAM_CAP_GB (testing): cap the allocator to emulate a smaller card.
+    from xvideo.lowvram import apply_vram_cap_for_testing
+    apply_vram_cap_for_testing(args.device)
     app = create_app(args)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info", ws_max_size=32 * 1024 * 1024, ws_per_message_deflate=False, loop="uvloop")
 

@@ -18,11 +18,9 @@ xVAE pipeline (with face/person presence gating) and streams edited frames back.
 
 ```
 deploy/
-├── run_server.sh          # launcher (env-driven; sources .env.local if present)
+├── run_server.sh          # launcher (env-driven)
 ├── requirements.txt       # pinned Python deps (SageAttention built separately)
 ├── sageattention-cudagraph-stream.patch  # stream fix for SageAttention (see §2)
-├── .env.example.fa4       # env template: B200 (FA4 -> cuDNN)
-├── .env.example.sage      # env template: RTX PRO 6000 / RTX 5090 (sage -> cuDNN)
 ├── joyomni_ops/           # in-tree CUDA op library (FP8 GEMM + fused kernels); pip install
 ├── xvideo/                # service code
 │   ├── config.py          # runtime/model config defaults
@@ -77,10 +75,10 @@ headers include during the build.)
 
 Then install the attention and kernel dependencies:
 
-- **SageAttention 2.2.0** (*required on sage machines — RTX PRO 6000 / RTX 5090;
-  skip on B200*) — INT8/FP8 quantized attention used for the DiT's long-kv
-  denoise attention (short-kv passes use PyTorch SDPA/cuDNN). Build from source
-  with the bundled CUDA-graph stream fix:
+- **SageAttention 2.2.0** (*RTX 5090 only; skip on B200 / RTX PRO 6000*) —
+  INT8 quantized attention, used for all DiT denoise attention when
+  `JOYOMNI_SAGE_ATTN=1`. Build from source with the bundled CUDA-graph
+  stream fix:
 
   ```bash
   # from the repo root
@@ -100,8 +98,9 @@ Then install the attention and kernel dependencies:
   The patch routes every kernel launch through `at::cuda::getCurrentCUDAStream()`
   instead of the default stream — without it, upstream SageAttention records
   empty CUDA graphs (kernels escape capture) and the server's graph path
-  produces noise. If sageattention is absent or `JOYOMNI_SAGE_ATTN=0`, attention
-  falls back to SDPA (cuDNN).
+  produces noise. `JOYOMNI_SAGE_ATTN` is the only switch: default `0` → SDPA
+  (cuDNN). Launch with `JOYOMNI_SAGE_ATTN=1` on an RTX 5090 (see §5); leave it
+  unset on RTX PRO 6000 / B200.
 - **flash-attn-4** (`4.0.0b13`, *required on FA4 machines — B200; skip on
   RTX PRO 6000 / 5090, its JIT does not support sm_120*) — provides
   `flash_attn.cute`; kernels JIT at runtime, no build step. Deps must be
@@ -152,9 +151,9 @@ print("torch", torch.__version__, "| cuda", torch.version.cuda,
       "| avail", torch.cuda.is_available(), "| gpus", torch.cuda.device_count())
 print("cv2", cv2.__version__, "| transformers", transformers.__version__)
 try:
-    import sageattention; print("sageattention: OK (default attention path)")
+    import sageattention; print("sageattention: OK (used when JOYOMNI_SAGE_ATTN=1 - RTX 5090)")
 except Exception as e:
-    print("sageattention: absent -> DiT uses SDPA/cuDNN fallback (slower)")
+    print("sageattention: absent -> SDPA/cuDNN (only needed when JOYOMNI_SAGE_ATTN=1)")
 try:
     import flash_attn.cute; print("flash_attn.cute: OK (FA4 importable; kernels JIT at first use)")
 except Exception as e:
@@ -268,28 +267,33 @@ deploy/deps/checkpoints/
 
 ## 4. Configure this machine
 
-Copy the template matching your GPU's attention path and fill in local values
-(conda location, optional prompt enhancement). `run_server.sh` sources
-`deploy/.env.local` automatically if present; it is git-ignored.
+Every setting is a plain environment variable with a working default; pass
+anything machine-specific inline on the launch command:
 
 ```bash
-cp deploy/.env.example.fa4 deploy/.env.local    # B200
-cp deploy/.env.example.sage deploy/.env.local   # RTX PRO 6000 / RTX 5090
+# the launcher activates conda itself when given the env (works from any shell):
+JOYOMNI_CONDA_SH=<conda-root>/etc/profile.d/conda.sh \
+JOYOMNI_CONDA_ENV=joyai-video-edit \
+bash deploy/run_server.sh
 
-# edit deploy/.env.local
+# or omit both and run inside an already-activated env:
+bash deploy/run_server.sh
+
+# optional prompt enhancement (no default; off when unset):
+PE_MODEL=<model> OPENAI_BASE_URL=<url> OPENAI_API_KEY=<key> bash deploy/run_server.sh
 ```
 
 Key variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `JOYOMNI_CONDA_SH` / `JOYOMNI_CONDA_ENV` | conda `profile.d/conda.sh` + env name/prefix to activate. Leave `JOYOMNI_CONDA_ENV` empty to use the already-active shell env. |
+| `JOYOMNI_CONDA_SH` / `JOYOMNI_CONDA_ENV` | conda `profile.d/conda.sh` + env name/prefix; the launcher activates it itself. Omit both to use the caller's python. |
 | `JOYOMNI_DEVICE` | CUDA device for all stages (default `cuda:0`). |
 | `JOYOMNI_HOST` / `JOYOMNI_PORT` | bind address (default `0.0.0.0:8080`). |
 | `JOYOMNI_WIDTH` / `JOYOMNI_HEIGHT` / `JOYOMNI_FPS` | Output resolution and frame rate (default `840` / `480` / `24` = 480p @ 24 FPS). Per-GPU presets in §5. |
 | `JOYOMNI_FP8_IMG` / `JOYOMNI_FP8_TXT` | FP8 image / text paths via `joyomni_ops` (default `1` / `1`). Set both `0` to run bf16 (e.g. a `JOYOMNI_OPS_NO_FP8=1` build). |
 | `JOYOMNI_CUDA_GRAPH` | capture the steady-state chunk loop into a CUDA graph (default `1`; the biggest single speedup). `0` runs eager. |
-| `JOYOMNI_SAGE_ATTN` | SageAttention for long-kv attention (default `1`). `0` falls back to SDPA/cuDNN. |
+| `JOYOMNI_SAGE_ATTN` | SageAttention for all DiT attention (default `0` → SDPA/cuDNN; set `1` on RTX 5090). |
 | `JOYOMNI_TXT_PARALLEL` | run each block's txt branch on a side CUDA stream inside the graph (default `1`). |
 | `JOYOMNI_CKPT_ROOT` | override the checkpoints dir (default `deploy/deps/checkpoints`). |
 | `JOYOMNI_DIT_CKPT` / `JOYOMNI_VAE_CKPT` / `JOYOMNI_TEXT_ENCODER_CKPT` / `JOYOMNI_FACE_ONNX` / `JOYOMNI_PERSON_ONNX` | override individual weight paths (default: derived from `JOYOMNI_CKPT_ROOT`). |
@@ -300,12 +304,24 @@ Key variables:
 
 ## 5. Launch
 
+Kernel caches live under `JOYOMNI_CACHE_ROOT` (default `deploy/deps/cache/`).
+When several GPU models serve from one checkout, give each its own root —
+Triton/Inductor autotune results from one GPU model replay slower on another:
+
 ```bash
+# RTX PRO 6000 — attention: cuDNN
 bash deploy/run_server.sh
+
+# B200 — attention: FA4
+JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_b200 bash deploy/run_server.sh
+
+# RTX 5090 — sage attention + fast-accum FP8
+JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 JOYOMNI_SAGE_ATTN=1 \
+  JOYOMNI_FP8_FAST_ACCUM=1 bash deploy/run_server.sh
 ```
 
-The launcher activates the env (if configured), exports the compile-cache dirs
-under `deps/cache/`, wires up the vendored checkpoint paths, and starts the server
+The launcher exports the compile-cache dirs under `JOYOMNI_CACHE_ROOT`, wires
+up the vendored checkpoint paths, and starts the server
 with every stage on a single device (`cuda:0` by default).
 
 Open the UI:
@@ -333,20 +349,73 @@ The server defaults to **840×480 @ 24 FPS** (480p). Override per GPU with `JOYO
   JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=16 bash deploy/run_server.sh
   ```
 
-- **RTX 5090** — coming soon.
+- **RTX 5090 (32GB)** — 480p @ 24 FPS:
 
-> The first launch is slow: PyTorch/Triton/CUDA kernels and the DiT attention path
-> compile and warm up. Keep `deploy/deps/cache/` stable across restarts to reuse
-> the compile artifacts. After moving or re-cloning the repo, the cache stores
-> absolute paths and is rebuilt once.
->
-> Warm restarts skip all kernel compilation. `xvideo/inductor_autotune_fix.py`
-> (auto-installed from `vae_compile` / `serve main`) patches torch 2.9-2.11 defects (upstream pytorch#172819, partially fixed in 2.12; the remaining .best_config ping-pong is patched through 2.13)
+  ```bash
+  JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 JOYOMNI_SAGE_ATTN=1 \
+    JOYOMNI_VAE_PRECISION=fp16 JOYOMNI_FP8_FAST_ACCUM=1 bash deploy/run_server.sh
+  ```
+
+  The DiT serves FP8-only (~16 GiB; the bf16 originals are freed once the FP8
+  twins install) and the encode/decode/pseudo VAEs share one set of weights
+  (1.4 GiB). Low-VRAM mode (auto below 48 GiB; force with `JOYOMNI_LOW_VRAM=1/0`)
+  changes two things (see `deploy/xvideo/lowvram.py`):
+
+  | | default (≥ 48 GiB) | low-VRAM |
+  |---|---|---|
+  | DiT load path | bf16 loaded to GPU, quantized to FP8 at first forward (bf16 freed as each block's twins install) | built on CPU, staged to GPU block-by-block as FP8 — the 31 GiB bf16 model is never GPU-resident |
+  | Text encoder (MiMo-VL-7B) | resident on GPU (15.6 GiB) | pinned CPU RAM, streamed through the GPU only during prompt encoding (~0 GiB resident; ~1-3 s per session start / KV reset) |
+
+  Requires `JOYOMNI_FP8_IMG=1` + `JOYOMNI_FP8_TXT=1` (the defaults). Host RAM
+  for the offloaded text encoder: ~32 GiB transient while it loads (the pinned
+  copy is built before the pageable original is released), settling to
+  ~16 GiB pinned; `JOYOMNI_TE_PIN=0` avoids the transient double at the cost
+  of slower H2D staging.
+
+  GeForce cards additionally run all bf16/fp8 tensor ops **with FP32
+  accumulation at half rate** (the pro cards are not derated), so
+  an RTX 5090 launch sets three GeForce-specific knobs explicitly (§5 command;
+  each defaults off):
+
+  | knob (set on 5090) | what it does |
+  |---|---|
+  | `JOYOMNI_CACHE_ROOT=deps/cache_rtx5090` | per-GPU-model kernel caches — Triton/Inductor autotune winners benchmarked on one GPU model are silently slow on another |
+  | `JOYOMNI_SAGE_ATTN=1` | sage (int8) attention for every DiT attention pass — int8 is not derated on GeForce while cuDNN/flash SDPA is (~35% faster at 480p serving shapes) |
+  | `JOYOMNI_FP8_FAST_ACCUM=1` | DiT fp8 linears via a Triton kernel that runs the full-rate fp16-accumulate MMA per 128-wide K-tile and promotes to an fp32 running sum (overflow-safe; operands are range-shifted to 1/16 of the e4m3 range, a pure exponent shift). dit stage 264 ms → 210 ms per 8-frame chunk at 480p |
+
+  Measured on a real RTX 5090 (31.4 GiB visible), synthetic 24 FPS client,
+  `num_inference_steps=2`, `max_temporal_ids=8`, gate/PE off:
+
+  | | 840×480 @ 24 | 1248×720 @ 16 |
+  |---|---|---|
+  | sustained output | **23.8 FPS (keeps up)** | 10.3 FPS (h264 out) |
+  | warm chunk (8 frames) | 315 ms (budget 333 ms) | ~630 ms solo / 813 ms backlogged |
+  | VRAM resident / peak | 21.5 / 27.1 GiB | 26.8 / 31.9 GiB (tight) |
+
+  The same harness on the RTX PRO 6000 measures 28.6 FPS capability at 480p24
+  and 15.2 FPS at 720p16 (h264; 13.8 with MJPEG output), so 480p24 is fully
+  aligned while 720p16 is **not reachable on a single 5090 without quality
+  changes**: the fp8 GEMMs are already at the card's fast-accum ceiling
+  (~460-500 TF vs ~712 TF on the Pro) and make up ~2/3 of the dit stage.
+  Options that do reach ≥16 FPS at 720p: put the VAE stages on a second GPU
+  (`--vae-encode-device cuda:1 --vae-decode-device cuda:1 --vae-pseudo-device
+  cuda:1 --postprocess-device cuda:1` → 13.4 FPS measured, PCIe-bound; needs
+  the per-device stream fix that ships with this change), or trade quality
+  (fewer steps / lower resolution / NVFP4 weights on Blackwell — unvalidated).
+
+> The first launch is slow: PyTorch/Triton/CUDA kernels and the DiT attention
+> path compile and warm up, so keep `deploy/deps/cache/` stable across restarts
+> to reuse the compile artifacts (the cache stores absolute paths — after moving
+> or re-cloning the repo it is rebuilt once). Warm restarts then skip all kernel
+> compilation: `xvideo/inductor_autotune_fix.py` (auto-installed from
+> `vae_compile` / `serve main`) patches torch 2.9-2.11 defects
+> ([pytorch#172819](https://github.com/pytorch/pytorch/issues/172819), partially
+> fixed in 2.12; the remaining `.best_config` ping-pong is patched through 2.13)
 > where kernels restored from the FX-graph cache re-ran coordinate-descent
-> autotuning on every boot (tens of seconds of GPU re-benchmarking, and the
-> `.best_config` files kept being rewritten). With the fix, the second boot
-> replays everything from `deps/cache/` — warmup time is pure model load +
-> cached-artifact deserialization + one eager full-pipeline pass. Set
+> autotuning on every boot — tens of seconds of GPU re-benchmarking, with the
+> `.best_config` files rewritten each time — so the second boot replays
+> everything from `deps/cache/` and warmup is pure model load + cached-artifact
+> deserialization + one eager full-pipeline pass. Set
 > `JOYOMNI_NO_COORDESC_CACHE_FIX=1` to disable the patch if a future torch
 > upgrade changes this code path.
 
