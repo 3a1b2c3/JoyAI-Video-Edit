@@ -77,10 +77,11 @@ headers include during the build.)
 
 Then install the attention and kernel dependencies:
 
-- **SageAttention 2.2.0** (*RTX 5090 only; skip on B200 / RTX PRO 6000*) —
-  INT8 quantized attention, used for all DiT denoise attention when
-  `JOYOMNI_SAGE_ATTN=1`. Build from source with the bundled CUDA-graph
-  stream fix:
+- **SageAttention 2.2.0** (*RTX 5090 only: GeForce runs fp32-accum SDPA at half
+  rate, so int8 sage wins there; RTX PRO 6000 is faster on plain cuDNN at every
+  serving shape, and B200 uses FA4*) — INT8 quantized attention, used for all
+  DiT denoise attention when `JOYOMNI_SAGE_ATTN=1`. Build from source with the
+  bundled CUDA-graph stream fix:
 
   ```bash
   # from the repo root
