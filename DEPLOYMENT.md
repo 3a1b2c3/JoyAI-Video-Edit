@@ -287,6 +287,7 @@ bash deploy/run_server.sh
 ```bash
 JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
 JOYOMNI_CONDA_ENV=joyai-video-edit \
+JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_pro6000 \
 bash deploy/run_server.sh
 ```
 
@@ -295,6 +296,7 @@ bash deploy/run_server.sh
 ```bash
 JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
 JOYOMNI_CONDA_ENV=joyai-video-edit \
+JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_pro6000 \
 JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=16 \
 bash deploy/run_server.sh
 ```
