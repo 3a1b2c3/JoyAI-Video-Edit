@@ -38,7 +38,7 @@ deploy/
 ```
 
 > **`deploy/deps/` is git-ignored.** It must exist on disk for the server to
-> start, but it is not tracked by this repo — you populate it in step 3.
+> start, but it is not tracked by this repo — you populate it in §3.
 
 ---
 
