@@ -483,14 +483,14 @@ const outputCanvasCtx = outputCanvas.getContext("2d");
 const stageTimings = document.getElementById("stageTimings");
 const stageTimingsPanel = document.getElementById("stageTimingsPanel");
 const peResultEl = document.getElementById("peResult");
-function showPeResult(text) {
+function showPeResult(text, model) {
   if (!peResultEl) return;
   const txt = (text || "").trim();
   if (!txt) { peResultEl.style.display = "none"; peResultEl.textContent = ""; return; }
   peResultEl.innerHTML = "";
   const lbl = document.createElement("span");
   lbl.className = "pe-result-label";
-  lbl.textContent = t("pe_enhanced_label");
+  lbl.textContent = t("pe_enhanced_label") + (model ? " (" + model + ")" : "");
   peResultEl.appendChild(lbl);
   peResultEl.appendChild(document.createTextNode(txt));
   peResultEl.style.display = "block";
@@ -1598,7 +1598,7 @@ async function beginSession() {
   peDeferThisSend = false;
   if (usePe && peCache && peCache.key === cacheKey && peCache.enhanced_prompt) {
     cachedEnhancedPrompt = peCache.enhanced_prompt;
-    showPeResult(cachedEnhancedPrompt);
+    showPeResult(cachedEnhancedPrompt, peCache.model);
   } else if (usePe) {
     peDeferThisSend = true;
     hidePeResult();
@@ -1804,7 +1804,7 @@ async function start() {
         const fallback = msg.fallback ? t("pe_fallback") : "";
         const error = msg.error ? t("pe_error") : "";
         const enhanced = msg.enhanced_prompt || msg.raw_prompt || "";
-        showPeResult(msg.error ? "" : enhanced);
+        showPeResult(msg.error ? "" : enhanced, msg.model);
         if (pendingPeCacheKey && msg.enhanced_prompt && !msg.error) {
           peCache = { key: pendingPeCacheKey, enhanced_prompt: msg.enhanced_prompt, raw_prompt: msg.raw_prompt || "", model: msg.model || "" };
         }

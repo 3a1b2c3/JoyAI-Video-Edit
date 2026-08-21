@@ -303,7 +303,7 @@ class PromptEnhancer:
         logger.error("PE failed after %d attempts: %s", self.max_retries, last_err)
         return None
 
-    def __call__(self, task_type, user_prompt, video=None, image=None, images=None) -> Optional[str]:
+    def __call__(self, task_type, user_prompt, video=None) -> Optional[str]:
         if not user_prompt or not user_prompt.strip():
             return user_prompt
         video_frames = _video_frames_to_b64(video)

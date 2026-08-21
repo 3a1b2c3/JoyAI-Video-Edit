@@ -364,7 +364,6 @@ def _person_present(image: Image.Image, *, onnx_path: str, conf: float) -> bool:
 def _enhance_prompt_sync(
     *,
     raw_prompt: str,
-    ref_image: Image.Image | None,
     pe_frame: Image.Image | None,
     pe_model: str | None,
 ) -> dict[str, Any]:
@@ -382,7 +381,6 @@ def _enhance_prompt_sync(
             task_type,
             raw_prompt,
             video=[pe_frame] if pe_frame is not None else None,
-            images=[ref_image] if ref_image is not None else None,
         )
         if isinstance(enhanced, str) and enhanced.strip():
             enhanced_prompt = enhanced.strip()
@@ -1879,13 +1877,13 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         gate_state["pe_anchor"] = None
                         await _send_json({"type": "pe_running", "frames_in": frames_in})
 
-                        async def _run_pe(_sess=session, _anchor=anchor, _raw=raw_session_prompt, _ref=ref_image):
+                        async def _run_pe(_sess=session, _anchor=anchor, _raw=raw_session_prompt):
                             nonlocal pe_defer, pe_report, pe_task
                             try:
                                 report = await asyncio.wait_for(
                                     asyncio.to_thread(
                                         _enhance_prompt_sync,
-                                        raw_prompt=_raw, ref_image=_ref,
+                                        raw_prompt=_raw,
                                         pe_frame=_anchor, pe_model=args.pe_model,
                                     ),
                                     timeout=max(1.0, float(args.pe_timeout_s)),
