@@ -78,8 +78,8 @@ headers include during the build.)
 Then install the attention and kernel dependencies:
 
 - **SageAttention 2.2.0** (*RTX 5090 only: GeForce runs fp32-accum SDPA at half
-  rate, so int8 sage wins there; RTX PRO 6000 is faster on plain cuDNN at every
-  serving shape, and B200 uses FA4*) — INT8 quantized attention, used for all
+  rate, so int8 sage wins there; RTX PRO 6000 is net faster on plain cuDNN at
+  the serving resolutions, and B200 uses FA4*) — INT8 quantized attention, used for all
   DiT denoise attention when `JOYOMNI_SAGE_ATTN=1`. Build from source with the
   bundled CUDA-graph stream fix:
 
@@ -322,12 +322,12 @@ Key variables:
 | `JOYOMNI_CUDA_GRAPH` | capture the steady-state chunk loop into a CUDA graph (default `1`; the biggest single speedup). `0` runs eager. |
 | `JOYOMNI_SAGE_ATTN` | SageAttention for all DiT attention (default `0` → SDPA/cuDNN; set `1` on RTX 5090). |
 | `JOYOMNI_FP8_FAST_ACCUM` | FP8 GEMMs accumulate in fp16 via a Triton kernel (default `0`; set `1` on RTX 5090, where fp32-accumulate tensor MMAs run at half rate — they run at full rate on RTX PRO 6000 / B200, so leave it unset there). |
-| `JOYOMNI_LOW_VRAM` | low-VRAM layout — CPU-staged FP8 DiT load + text-encoder CPU offload (default `auto`: on below 48 GiB; see `deploy/xvideo/lowvram.py`). |
+| `JOYOMNI_LOW_VRAM` | low-VRAM layout — CPU-staged FP8 DiT load + text-encoder CPU offload (default `auto`: on below 48 GiB; see `deploy/xvideo/lowvram.py`). 480p24 measured ~21.5 GiB resident / ~28 GiB peak under a 30 GiB allocator cap — fits 32 GB cards. |
 | `JOYOMNI_CACHE_ROOT` | compile-cache root — torchinductor / triton / nv_compute caches live under it (default `deploy/deps/cache`). Give each GPU model its own root when several share a checkout (per-card commands above). |
 | `JOYOMNI_CKPT_ROOT` | override the checkpoints dir (default `deploy/deps/checkpoints`). |
 | `JOYOMNI_DIT_CKPT` / `JOYOMNI_VAE_CKPT` / `JOYOMNI_TEXT_ENCODER_CKPT` / `JOYOMNI_FACE_ONNX` / `JOYOMNI_PERSON_ONNX` | override individual weight paths (default: derived from `JOYOMNI_CKPT_ROOT`). |
 | `JOYOMNI_RECORD_DIR` | recording output dir. |
-| `PE_MODEL` / `OPENAI_BASE_URL` / `OPENAI_API_KEY` | OpenAI-compatible endpoint for prompt enhancement. If unset, the server falls back to the raw user prompt. |
+| `PE_MODEL` / `OPENAI_BASE_URL` / `OPENAI_API_KEY` | Prompt-enhancement endpoint: OpenAI-compatible, or Anthropic-protocol when the base URL contains `/anthropic` (key sent as `Authorization: Bearer`). If unset, the server falls back to the raw user prompt. |
 
 ---
 
