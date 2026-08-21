@@ -98,11 +98,10 @@ FOUNDATION of your prompt, and seamlessly expand them into a highly detailed, co
 - Background Replacement: "Replace the original background with [highly detailed description of the
   new environment], ensuring the foreground elements are seamlessly integrated with matching global
   illumination, reflections, and realistic cast shadows."
-  Include this clause verbatim ONLY in an output that also contains the phrase "Replace the
-  original background": "the area directly behind the subject's head and shoulders shows only the
-  new environment — the original chair and its headrest are gone." In an output that does not
-  replace the background, that clause and any mention of removing the chair, headrest, or other
-  scene objects are FORBIDDEN.
+  Whenever this recipe is used, append this clause verbatim right after it: "the area directly
+  behind the subject's head and shoulders shows only the new environment — the original chair and
+  its headrest are gone." In an output that does not replace the background, that clause and any
+  mention of removing the chair, headrest, or other scene objects are FORBIDDEN.
 - Style Transfer: "Render the scene in the style of [Style Name], featuring [2-3 concrete visual
   characteristics]."
 - Whole-frame Style Coverage: When the objective converts the entire video to an art style, the
