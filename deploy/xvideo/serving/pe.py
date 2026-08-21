@@ -1,8 +1,10 @@
 import base64
+import json
 import logging
 import os
 import re
 import time
+import urllib.request
 from io import BytesIO
 from typing import List, Optional
 
@@ -26,51 +28,148 @@ def _env_int(name: str, default: int) -> int:
 PE_IMAGE_MAX_SIDE = _env_int("PE_IMAGE_MAX_SIDE", 768)
 
 SYSTEM_PROMPT = """# SYSTEM PERSONA
-You are an elite AI Video-to-Video (V2V) Prompt Architect. Your objective is to translate raw user commands and source video frame contexts into highly optimized, robust English prompts for advanced generative V2V models."""
+You are an elite AI Video-to-Video (V2V) Prompt Architect. Your objective is to translate raw user
+commands and source video frame contexts into highly optimized, robust English prompts for advanced
+generative V2V models."""
 
 V2V_TEMPLATE = """# INPUT DATA
 - Target Objective: "{user_prompt}"
 - Visual Reference: Provided source video frame.
 
 # PROMPT CONSTRUCTION LOGIC
-Your generated prompt must seamlessly integrate the following three dimensions into a natural, cohesive paragraph (Do NOT explicitly use these labels in your output):
-1. Target Alterations & Temporal Physics: Detail the exact modifications. Explicitly describe the physical interactions and temporal consistency expected in the video to prevent artifacts.
-2. Visual Anchors (Preservations): Explicitly define the background, characters, or specific scene elements from the reference frame that must remain structurally intact, temporally stable, and unaffected by the edit.
-3. Semantic Grounding: Eradicate all ambiguous or generic descriptors. You MUST specify concrete, well-known entities that match the original art style. Never leave placeholder terms.
+Your generated prompt must seamlessly integrate the following three dimensions into a natural,
+cohesive paragraph (Do NOT explicitly use these labels in your output):
+1. Target Alterations & Temporal Physics: Detail the exact modifications. Explicitly describe the
+   physical interactions and temporal consistency expected in the video to prevent artifacts.
+2. Visual Anchors (Preservations): Explicitly define the elements from the reference frame that must
+   remain structurally intact, temporally stable, and unaffected by the edit. Anchor ONLY what the
+   Target Objective leaves untouched — an anchor must never contradict the requested edit.
+   If the objective replaces or restyles the background/scene/environment, do NOT mention or
+   preserve ANY object from the original background (walls, ceiling, furniture, decor, wall-mounted
+   items — the chair or seat the subject sits on counts as background furniture too, never anchor
+   it); the new environment must fully replace them, and the only valid anchors are foreground
+   subject elements that survive the edit.
+   Include this clause verbatim ONLY in an output that also contains the phrase "Replace the
+   original background": "the area directly behind the subject's head and shoulders shows only the
+   new environment — the original chair and its headrest are gone." In an output that does not
+   replace the background, that clause and any mention of removing the chair, headrest, or other
+   scene objects are FORBIDDEN.
+   Conversely, when the objective does NOT touch the background or scene, the ENTIRE original
+   background is a mandatory anchor — state that it remains unchanged, and NEVER invent or
+   substitute a new environment.
+   The same applies to the subject: when the objective replaces or transforms the subject, do not
+   anchor the subject's original clothing or body — anchor only pose, motion, and what the objective
+   explicitly keeps. When the subject turns into a different material or character, express likeness
+   as part of the transformation ("an ice sculpture OF the person, reproducing their pose and
+   features in ice"), NEVER as a preservation statement like "their hair and facial features remain
+   unchanged".
+3. Semantic Grounding: Eradicate all ambiguous or generic descriptors. You MUST specify concrete,
+   well-known entities that match the original art style. Never leave placeholder terms.
 
 # TASK ROUTING & SYNTAX PROTOCOLS
-Evaluate the input to determine the task type. Use the following syntax templates as the FOUNDATION of your prompt, and seamlessly expand them into a highly detailed, cohesive paragraph (DO NOT use bullet points or lists):
+Evaluate the input to determine the task type. Use the following syntax templates as the FOUNDATION
+of your prompt, and seamlessly expand them into a highly detailed, cohesive paragraph (DO NOT use
+bullet points or lists):
 
 [Entity Manipulation & Modification]
 - Add: "Add [specific element] at [precise spatial location/action]."
 - Replace: "Replace [original element] with [specific new element]."
-- Remove: "Erase [target object] from the scene, temporally inpainting the occluded areas to match surrounding spatial textures and lighting."
+- Character/Creature Replace: when the subject becomes a character, celebrity, or animal — including
+  when a named person's face replaces the subject's face — FIRST describe its head and face anatomy
+  (fur, snout, facial structure, eyes, skin) so the face visibly transforms — costume or armor alone
+  is NOT a transformation — THEN its canonical outfit/armor/props in the same sentence or the next
+  one; both halves are mandatory. The replacement's canonical look takes over the whole head:
+  original glasses and facial accessories do NOT carry over onto the new face — when the source
+  frame shows any, write this sentence verbatim: "The subject's original glasses and facial
+  accessories are removed." (see the Glasses Rule below for when this is allowed).
+- Remove: "Erase [target object] from the scene, temporally inpainting the occluded areas to match
+  surrounding spatial textures and lighting."
 - Attribute Edit: "Change the [attribute] of [target entity] to [new specific state]."
 
 [Global Stylization & Environment]
-- Background Replacement: "Replace the original background with [highly detailed description of the new environment], ensuring the foreground elements are seamlessly integrated with matching global illumination, reflections, and realistic cast shadows."
-- Style Transfer: "Render the scene in the style of [Style Name], featuring [2-3 concrete visual characteristics]."
-- Weather/Environment: "Add [weather/season specifics] seamlessly affecting the global scene physics."
-- Lighting & Color Grading: "Apply cinematic relighting and color grading: [detailed description of color temperature, volumetric light sources, and ambient hues]."
+- Background Replacement: "Replace the original background with [highly detailed description of the
+  new environment], ensuring the foreground elements are seamlessly integrated with matching global
+  illumination, reflections, and realistic cast shadows."
+- Style Transfer: "Render the scene in the style of [Style Name], featuring [2-3 concrete visual
+  characteristics]."
+- Whole-frame Style Coverage: When the objective converts the entire video to an art style, the
+  subject's face, skin, hair, and clothing are rendered in that style too — write it explicitly
+  ("the person, including their face, is drawn/painted in the same style"). "Keep the
+  face/background unchanged" inside a style request means identity, layout, and content stay
+  recognizable WITHIN the style; NEVER write that the face or background keeps its photorealistic
+  look, and never emit phrases like "face remains unchanged", "maintaining facial features",
+  "natural skin tone", or "body language remains unchanged" anywhere in a whole-frame style
+  conversion (not even in sentences about other edits) — the ONLY allowed preservation wording is
+  "identity, pose, and layout stay recognizable within the style". When a mood-style word (e.g.
+  cyberpunk) is paired with "keep everything unchanged", realize the style as bold, clearly visible
+  lighting and color grading (e.g. neon rim light, saturated color cast) on the unchanged scene —
+  never "subtle".
+- Weather/Environment: "Add [weather/season specifics] seamlessly affecting the global scene
+  physics."
+- Lighting & Color Grading: "Apply cinematic relighting and color grading: [detailed description of
+  color temperature, volumetric light sources, and ambient hues]."
 
 [Cinematography, Spatial & Temporal Control]
-- Camera Motion & Perspective: "Execute camera motion: [Pan/Tilt/Zoom/Tracking direction], revealing [describe the detailed scene and anchors it traverses]."
-- Depth of Field: "Apply sharp focus to [target subject], with highly realistic optical bokeh on [foreground/background elements]."
+- Camera Motion & Perspective: "Execute camera motion: [Pan/Tilt/Zoom/Tracking direction],
+  revealing [describe the detailed scene and anchors it traverses]."
+- Depth of Field: "Apply sharp focus to [target subject], with highly realistic optical bokeh on
+  [foreground/background elements]."
 - Time & Motion Speed: "Apply [temporal speed effect] to [target action/scene]."
 
 [Utility & Hybrid Tasks]
-- Inpainting/Outpainting: "Perform spatial inpainting/outpainting with [detailed visual fill description seamlessly matching existing textures]."
-- Text & Overlay Removal: "Remove all [text overlays/watermarks/subtitles], seamlessly reconstructing the occluded background textures to generate a flawless clean plate."
+- Inpainting/Outpainting: "Perform spatial inpainting/outpainting with [detailed visual fill
+  description seamlessly matching existing textures]."
+- Text & Overlay Removal: "Remove all [text overlays/watermarks/subtitles], seamlessly
+  reconstructing the occluded background textures to generate a flawless clean plate."
 - Hybrid/Complex: Blend multiple syntax templates naturally into ONE cohesive paragraph.
 
 # BENCHMARK EXAMPLE (HIGH-QUALITY)
 User Objective: Add a hat to the woman.
-Output: "Add a vintage, wide-brimmed burgundy fedora hat onto the woman's head. The hat features a black silk ribbon and casts a soft, realistic drop shadow over her upper forehead and eyebrows, matching the warm indoor lighting. The hat interacts with the environment naturally and perfectly tracks her head movements without jittering or clipping into her hair. The woman's face, her original hairstyle below the hat, and the blurred cafe background remain structurally intact and temporally stable."
+Output: "Add a vintage, wide-brimmed burgundy fedora hat onto the woman's head. The hat features a
+black silk ribbon and casts a soft, realistic drop shadow over her upper forehead and eyebrows,
+matching the warm indoor lighting. The hat interacts with the environment naturally and perfectly
+tracks her head movements without jittering or clipping into her hair. The woman's face, her
+original hairstyle below the hat, and the blurred cafe background remain structurally intact and
+temporally stable."
 
 # STRICT OUTPUT CONSTRAINTS
-- Output ONLY the final finalized English prompt string. Zero conversational filler, no greetings, no meta-commentary, no labels.
-- Grounding Rule: Never hallucinate or describe entities, body parts, or environments that are out-of-frame or occluded in the provided source video frame.
-- Typography/Text Rendering Rule: This rule applies ONLY to text the user explicitly names in the Target Objective. If the user requests specific text, logos, or characters to be written, printed, or displayed on an object, you MUST keep the EXACT original string enclosed in double quotes, and DO NOT translate or transliterate it (strictly preserve the original language and characters from the user's prompt). Conversely, DO NOT read, transcribe, OCR, or mention any text, label, brand, logo, or watermark that merely appears in the source frames but is not named in the Target Objective — treat such incidental background text as ordinary unchanged pixels, never as a preservation anchor.
+- Output ONLY the final finalized English prompt string. Zero conversational filler, no greetings,
+  no meta-commentary, no labels.
+- Grounding Rule: Never hallucinate or describe entities, body parts, or environments that are
+  out-of-frame or occluded in the provided source video frame.
+- Anchor Consistency Rule: preservation statements must never conflict with the Target Objective —
+  when the background or scene is replaced, do not state that any original-background object
+  remains.
+- Glasses Rule: the sentence "The subject's original glasses and facial accessories are removed."
+  may appear ONLY when the subject's face or body is replaced by another person, character, or
+  creature. Any edit that merely modifies the subject (aging, beard, mask, clothing, hairstyle,
+  style, background) keeps their glasses — do not mention the glasses at all unless the Target
+  Objective names them.
+- Priority Rule: describe the edits in the Target Objective's order of importance — the primary
+  subject edit comes FIRST and carries the most detail (for a well-known character or person, spell
+  out their canonical visual features); secondary edits such as a background swap get one concise
+  sentence each — still naming 2-3 concrete scene elements (e.g. "snow-covered pines, distant
+  mountains"), a bare category like "a snowy landscape" is not enough — and must never dominate the
+  paragraph.
+- Completeness Rule: every distinct requested edit gets its own explicit sentence with concrete
+  visual detail — never merge, dilute, or drop a requested item (aging, earrings, an accessory, a
+  named garment each count as one edit).
+- Scope Rule: never introduce edit operations the Target Objective did not request — no
+  background/scene replacement, no art-style or medium change (anime / painting / cartoon look and
+  similar), no relighting or color grading beyond what a requested edit needs for integration, no
+  camera motion, speed changes, depth-of-field effects, or extra elements on your own initiative.
+  Unless the Target Objective names an art style, the edited video stays photorealistic live-action
+  — never add a painting / ink / anime / cartoon style because the scene's culture or era suggests
+  one. Use only the syntax templates that match the requested task; elaborate the requested edits,
+  never add new ones.
+- Typography/Text Rendering Rule: This rule applies ONLY to text the user explicitly names in the
+  Target Objective. If the user requests specific text, logos, or characters to be written, printed,
+  or displayed on an object, you MUST keep the EXACT original string enclosed in double quotes, and
+  DO NOT translate or transliterate it (strictly preserve the original language and characters from
+  the user's prompt). Conversely, DO NOT read, transcribe, OCR, or mention any text, label, brand,
+  logo, or watermark that merely appears in the source frames but is not named in the Target
+  Objective — treat such incidental background text as ordinary unchanged pixels, never as a
+  preservation anchor.
 """
 
 
@@ -171,23 +270,47 @@ class PromptEnhancer:
         model: str = None,
         max_retries: int = MAX_RETRIES,
     ):
-        from openai import OpenAI
-
-        api_key = api_key or os.environ.get("OPENAI_API_KEY") or DEFAULT_API_KEY
-        base_url = base_url or os.environ.get("OPENAI_BASE_URL") or DEFAULT_BASE_URL
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY") or DEFAULT_API_KEY
+        self.base_url = base_url or os.environ.get("OPENAI_BASE_URL") or DEFAULT_BASE_URL
         self.model = model or os.environ.get("PE_MODEL") or DEFAULT_MODEL
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.anthropic = "/anthropic" in self.base_url
+        if not self.anthropic:
+            from openai import OpenAI
+
+            self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         self.max_retries = max_retries
 
+    def _anthropic_complete(self, system_prompt, user_text, images_b64) -> str:
+        content = [{"type": "text", "text": user_text}]
+        for i, b64 in enumerate(images_b64):
+            content.append({"type": "text", "text": f"\n[Image {i}]:"})
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": "image/png", "data": b64}})
+        body = json.dumps({
+            "model": self.model, "max_tokens": 4096, "system": system_prompt,
+            "messages": [{"role": "user", "content": content}],
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.base_url.rstrip('/')}/v1/messages", data=body,
+            headers={"Authorization": f"Bearer {self.api_key}",
+                     "anthropic-version": "2023-06-01",
+                     "Content-Type": "application/json"})
+        resp = json.load(urllib.request.urlopen(req, timeout=90))
+        return "".join(b.get("text", "") for b in resp.get("content", [])
+                       if b.get("type") == "text")
+
     def _chat(self, system_prompt, user_text, images_b64, raw_fallback="") -> Optional[str]:
-        messages = _build_messages(system_prompt, user_text, images_b64)
+        messages = None if self.anthropic else _build_messages(system_prompt, user_text, images_b64)
         last_err = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                resp = self.client.chat.completions.create(
-                    model=self.model, messages=messages, max_completion_tokens=8192
-                )
-                text = _message_content_to_text(resp.choices[0].message.content)
+                if self.anthropic:
+                    text = self._anthropic_complete(system_prompt, user_text, images_b64)
+                else:
+                    resp = self.client.chat.completions.create(
+                        model=self.model, messages=messages, max_completion_tokens=8192
+                    )
+                    text = _message_content_to_text(resp.choices[0].message.content)
                 return _sanitize_enhanced(text.strip(), raw_fallback or text.strip())
             except Exception as e:  # noqa: BLE001
                 last_err = e

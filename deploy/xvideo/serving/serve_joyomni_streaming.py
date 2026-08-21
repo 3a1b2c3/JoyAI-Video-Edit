@@ -2033,7 +2033,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Downlink transport. 'auto' honors browser h264 (saves bandwidth; display-only, does not affect generated identity). 'mjpeg' forces JPEG. Default auto.")
     parser.add_argument("--prompt", type=str, default="Keep the person and scene temporally consistent while applying the requested edit.")
     parser.add_argument("--profile-timings", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--kv-reset-frames", type=int, default=1080)
+    parser.add_argument("--kv-reset-frames", type=int, default=600)
     parser.add_argument("--max-temporal-ids", type=int, default=None)
     parser.add_argument("--freeze-kv-on-static", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--static-diff-thresh", type=float, default=0.5)
