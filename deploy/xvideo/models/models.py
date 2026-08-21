@@ -1,3 +1,5 @@
+import os
+
 import torch
 from transformers import Qwen2Tokenizer, Qwen2_5_VLForConditionalGeneration
 from loguru import logger
@@ -73,7 +75,7 @@ def load_pipeline(cfg, dit, device: torch.device):
 
     vae = build_vae(cfg, device)
 
-    te_offload = te_cpu_offload_enabled(device)
+    te_offload = te_cpu_offload_enabled()
     tokenizer, text_encoder = load_text_encoder(
         torch_dtype=PRECISION_TO_TYPE[cfg.text_encoder_precision],
         device=device,
@@ -148,12 +150,14 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     from xvideo.lowvram import low_vram_enabled
 
     device_obj = torch.device(device)
-    low_vram = low_vram_enabled(device_obj) and device_obj.type == "cuda"
+    low_vram = low_vram_enabled() and device_obj.type == "cuda"
 
     state_dict = None
     if cfg.dit_ckpt is not None:
         logger.info(f"Loading DiT checkpoint: {cfg.dit_ckpt}")
-        state_dict = torch.load(cfg.dit_ckpt, map_location="cpu", weights_only=True, mmap=True)
+        # No mmap on HF Spaces: /data is FUSE, page faults crawl (hours for 30 GiB).
+        mmap_ok = "SPACE_ID" not in os.environ
+        state_dict = torch.load(cfg.dit_ckpt, map_location="cpu", weights_only=True, mmap=mmap_ok)
         if "model" in state_dict:
             state_dict = state_dict["model"]
 

@@ -26,7 +26,7 @@ deploy/
 │   ├── config.py          # runtime/model config defaults
 │   ├── utils.py           # resize buckets, seeding helpers
 │   ├── inductor_autotune_fix.py  # torch 2.9+ compile-cache fix
-│   ├── lowvram.py         # low-VRAM mode (auto below 48 GiB) switches
+│   ├── lowvram.py         # low-VRAM mode switches (JOYOMNI_LOW_VRAM=1)
 │   ├── models/            # dit/, vae/, pipeline, flow-match scheduler, loaders
 │   └── serving/           # FastAPI app, streaming runtime, CUDA-graph runner, prompt-enhancement
 ├── static/index.html      # browser client
@@ -306,7 +306,7 @@ bash deploy/run_server.sh
 JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
 JOYOMNI_CONDA_ENV=joyai-video-edit \
 JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_rtx5090 \
-JOYOMNI_SAGE_ATTN=1 JOYOMNI_FP8_FAST_ACCUM=1 \
+JOYOMNI_SAGE_ATTN=1 JOYOMNI_FP8_FAST_ACCUM=1 JOYOMNI_LOW_VRAM=1 \
 bash deploy/run_server.sh
 ```
 
@@ -322,66 +322,9 @@ Key variables:
 | `JOYOMNI_CUDA_GRAPH` | capture the steady-state chunk loop into a CUDA graph (default `1`; the biggest single speedup). `0` runs eager. |
 | `JOYOMNI_SAGE_ATTN` | SageAttention for all DiT attention (default `0` → SDPA/cuDNN; set `1` on RTX 5090). |
 | `JOYOMNI_FP8_FAST_ACCUM` | FP8 GEMMs accumulate in fp16 via a Triton kernel (default `0`; set `1` on RTX 5090, where fp32-accumulate tensor MMAs run at half rate — they run at full rate on RTX PRO 6000 / B200, so leave it unset there). |
-| `JOYOMNI_LOW_VRAM` | low-VRAM layout — CPU-staged FP8 DiT load + text-encoder CPU offload (default `auto`: on below 48 GiB; see `deploy/xvideo/lowvram.py`). 480p24 measured ~21.5 GiB resident / ~28 GiB peak under a 30 GiB allocator cap — fits 32 GB cards. |
+| `JOYOMNI_LOW_VRAM` | low-VRAM layout — CPU-staged FP8 DiT load + text-encoder CPU offload (default `0`; set `1` on ≤48 GB cards — the full layout needs ~46.5 GB steady at 720p16). 480p24 measured ~21.5 GiB resident / ~28 GiB peak under a 30 GiB allocator cap — fits 32 GB cards. |
 | `JOYOMNI_CACHE_ROOT` | compile-cache root — torchinductor / triton / nv_compute caches live under it (default `deploy/deps/cache`). Give each GPU model its own root when several share a checkout (per-card commands above). |
 | `JOYOMNI_CKPT_ROOT` | override the checkpoints dir (default `deploy/deps/checkpoints`). |
 | `JOYOMNI_DIT_CKPT` / `JOYOMNI_VAE_CKPT` / `JOYOMNI_TEXT_ENCODER_CKPT` / `JOYOMNI_FACE_ONNX` / `JOYOMNI_PERSON_ONNX` | override individual weight paths (default: derived from `JOYOMNI_CKPT_ROOT`). |
 | `JOYOMNI_RECORD_DIR` | recording output dir. |
 | `PE_MODEL` / `OPENAI_BASE_URL` / `OPENAI_API_KEY` | Prompt-enhancement endpoint: OpenAI-compatible, or Anthropic-protocol when the base URL contains `/anthropic` (key sent as `Authorization: Bearer`). If unset, the server falls back to the raw user prompt. |
-
----
-
-## HTTP / WebSocket API
-
-The web UI at `/` is a full client for everything below; the endpoints matter
-when you drive the server from your own code.
-
-| Method | Path             | Purpose                                        |
-|--------|------------------|------------------------------------------------|
-| GET    | `/`              | Web UI (`static/index.html`)                   |
-| GET    | `/health`        | Health check (devices, active settings)        |
-| GET    | `/debug`         | Runtime debug state (session queues, workers, flow control) |
-| GET    | `/ref-images`    | Built-in reference images as data URLs         |
-| POST   | `/load`          | Block until the model is loaded and warmed up (no-op afterwards) |
-| GET    | `/download_last` | Download the last finalized clip (needs `--record-dir` and a `finalize_recording` message) |
-| WS     | `/ws`            | Stream source frames in, edited frames out     |
-
-```bash
-curl http://127.0.0.1:8080/health
-curl -X POST http://127.0.0.1:8080/load
-```
-
-**`/ws` protocol** — JSON text frames control the session, binary frames carry
-video:
-
-1. Connect and wait for `{"type": "session_granted"}`. The server runs one
-   session at a time; while another client holds it you receive
-   `queue_position` messages.
-2. Send `start`:
-
-   ```json
-   {"type": "start", "prompt": "Turn the shirt red.", "width": 840,
-    "height": 480, "fps": 24, "output_codec": "mjpeg", "gate_enabled": false}
-   ```
-
-   Optional fields: `ref_image` (data URL, for reference-image edits), `seed`,
-   `num_inference_steps`, `use_pe` (prompt enhancement — briefly holds the
-   stream on the first frame), `kv_reset_frames`, `output_quality`.
-   `gate_enabled: false` skips the face/person presence gate; with it on (the
-   UI default) frames are answered with `waiting_face` / `no_person` until a
-   stable, centered face is in view. The server answers `started`.
-3. Stream frames: per frame, optionally send
-   `{"type": "frame_meta", "seq": N, "t_capture_ms": <unix ms>}`, then one
-   binary message with the frame bytes (JPEG or H.264 Annex-B — the server
-   sniffs the format). The first frame alone produces chunk 0; after that
-   every 8 source frames produce one 8-frame output chunk.
-4. Read results: every uploaded frame is acknowledged with `accepted`;
-   finished chunks arrive asynchronously as `chunk_start`, then per frame an
-   `output_frame` JSON header followed by one binary JPEG, then `chunk_done`.
-   When frames arrive faster than the server edits, the excess is dropped —
-   `output_frame.source_seq` names the source frame each output corresponds
-   to. `error` is fatal. With `"output_codec": "h264"` the binary payloads are
-   H.264 Annex-B packets instead (`output_frame.key` marks keyframes).
-5. `{"type": "stop"}` ends the session; a connection that stops sending
-   frames is released after 10 s (`session_timeout`) so the next queued
-   client can start.

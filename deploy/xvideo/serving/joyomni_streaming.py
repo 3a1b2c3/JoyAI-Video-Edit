@@ -235,7 +235,7 @@ class JoyOmniRuntime:
         seed_everything(seed)
 
         from xvideo.lowvram import log_mode
-        log_mode(device_obj)
+        log_mode()
 
         cfg = ExpConfig()
         if vae_ckpt is not None:
