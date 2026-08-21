@@ -36,52 +36,60 @@ V2V_TEMPLATE = """# INPUT DATA
 - Target Objective: "{user_prompt}"
 - Visual Reference: Provided source video frame.
 
-# PROMPT CONSTRUCTION LOGIC
-Your generated prompt must seamlessly integrate the following three dimensions into a natural,
-cohesive paragraph (Do NOT explicitly use these labels in your output):
-1. Target Alterations & Temporal Physics: Detail the exact modifications. Explicitly describe the
-   physical interactions and temporal consistency expected in the video to prevent artifacts.
-2. Visual Anchors (Preservations): Explicitly define the elements from the reference frame that must
-   remain structurally intact, temporally stable, and unaffected by the edit. Anchor ONLY what the
-   Target Objective leaves untouched — an anchor must never contradict the requested edit.
-   If the objective replaces or restyles the background/scene/environment, do NOT mention or
-   preserve ANY object from the original background (walls, ceiling, furniture, decor, wall-mounted
-   items — the chair or seat the subject sits on counts as background furniture too, never anchor
-   it); the new environment must fully replace them, and the only valid anchors are foreground
-   subject elements that survive the edit.
-   Include this clause verbatim ONLY in an output that also contains the phrase "Replace the
-   original background": "the area directly behind the subject's head and shoulders shows only the
-   new environment — the original chair and its headrest are gone." In an output that does not
-   replace the background, that clause and any mention of removing the chair, headrest, or other
-   scene objects are FORBIDDEN.
-   Conversely, when the objective does NOT touch the background or scene, the ENTIRE original
-   background is a mandatory anchor — state that it remains unchanged, and NEVER invent or
-   substitute a new environment.
-   The same applies to the subject: when the objective replaces or transforms the subject, do not
-   anchor the subject's original clothing or body — anchor only pose, motion, and what the objective
-   explicitly keeps. When the subject turns into a different material or character, express likeness
-   as part of the transformation ("an ice sculpture OF the person, reproducing their pose and
-   features in ice"), NEVER as a preservation statement like "their hair and facial features remain
-   unchanged".
-3. Semantic Grounding: Eradicate all ambiguous or generic descriptors. You MUST specify concrete,
-   well-known entities that match the original art style. Never leave placeholder terms.
+# OUTPUT CONTRACT
+- Output ONLY the final finalized English prompt string, as ONE natural, cohesive paragraph — no
+  bullet points or lists, zero conversational filler, no greetings, no meta-commentary, no labels
+  (never echo section names from this instruction).
+- Grounding: Never hallucinate or describe entities, body parts, or environments that are
+  out-of-frame or occluded in the provided source video frame.
+- Typography/Text Rendering: This rule applies ONLY to text the user explicitly names in the Target
+  Objective. If the user requests specific text, logos, or characters to be written, printed, or
+  displayed on an object, you MUST keep the EXACT original string enclosed in double quotes, and
+  DO NOT translate or transliterate it (strictly preserve the original language and characters from
+  the user's prompt). Conversely, DO NOT read, transcribe, OCR, or mention any text, label, brand,
+  logo, or watermark that merely appears in the source frames but is not named in the Target
+  Objective — treat such incidental background text as ordinary unchanged pixels, never as a
+  preservation anchor.
 
-# TASK ROUTING & SYNTAX PROTOCOLS
-Evaluate the input to determine the task type. Use the following syntax templates as the FOUNDATION
-of your prompt, and seamlessly expand them into a highly detailed, cohesive paragraph (DO NOT use
-bullet points or lists):
+# EDIT PLAN
+1. Scope: Never introduce edit operations the Target Objective did not request — no
+   background/scene replacement, no art-style or medium change (anime / painting / cartoon look and
+   similar), no relighting or color grading beyond what a requested edit needs for integration, no
+   camera motion, speed changes, depth-of-field effects, or extra elements on your own initiative.
+   Unless the Target Objective names an art style, the edited video stays photorealistic
+   live-action — never add a painting / ink / anime / cartoon style because the scene's culture or
+   era suggests one. Use only the recipes that match the requested task; elaborate the requested
+   edits, never add new ones.
+2. Priority: Describe the edits in the Target Objective's order of importance — the primary subject
+   edit comes FIRST and carries the most detail (for a well-known character or person, spell out
+   their canonical visual features); secondary edits such as a background swap get one concise
+   sentence each — still naming 2-3 concrete scene elements (e.g. "snow-covered pines, distant
+   mountains"), a bare category like "a snowy landscape" is not enough — and must never dominate
+   the paragraph.
+3. Completeness: Every distinct requested edit gets its own explicit sentence with concrete visual
+   detail — never merge, dilute, or drop a requested item (aging, earrings, an accessory, a named
+   garment each count as one edit).
+4. Grounding & Physics: Eradicate all ambiguous or generic descriptors — specify concrete,
+   well-known entities that match the original art style, never leave placeholder terms. For each
+   edit, describe the physical interactions and temporal consistency expected in the video
+   (tracking, deformation, shadows) to prevent artifacts.
+
+# EDIT RECIPES
+Evaluate the Target Objective to determine the task type. Use the matching recipes as the
+FOUNDATION of your prompt, and seamlessly expand them into a highly detailed, cohesive paragraph
+(DO NOT use bullet points or lists):
 
 [Entity Manipulation & Modification]
 - Add: "Add [specific element] at [precise spatial location/action]."
 - Replace: "Replace [original element] with [specific new element]."
-- Character/Creature Replace: when the subject becomes a character, celebrity, or animal — including
+- Character/Creature Replace: When the subject becomes a character, celebrity, or animal — including
   when a named person's face replaces the subject's face — FIRST describe its head and face anatomy
   (fur, snout, facial structure, eyes, skin) so the face visibly transforms — costume or armor alone
   is NOT a transformation — THEN its canonical outfit/armor/props in the same sentence or the next
   one; both halves are mandatory. The replacement's canonical look takes over the whole head:
   original glasses and facial accessories do NOT carry over onto the new face — when the source
   frame shows any, write this sentence verbatim: "The subject's original glasses and facial
-  accessories are removed." (see the Glasses Rule below for when this is allowed).
+  accessories are removed." (see the Glasses rule below for when this is allowed).
 - Remove: "Erase [target object] from the scene, temporally inpainting the occluded areas to match
   surrounding spatial textures and lighting."
 - Attribute Edit: "Change the [attribute] of [target entity] to [new specific state]."
@@ -90,6 +98,11 @@ bullet points or lists):
 - Background Replacement: "Replace the original background with [highly detailed description of the
   new environment], ensuring the foreground elements are seamlessly integrated with matching global
   illumination, reflections, and realistic cast shadows."
+  Include this clause verbatim ONLY in an output that also contains the phrase "Replace the
+  original background": "the area directly behind the subject's head and shoulders shows only the
+  new environment — the original chair and its headrest are gone." In an output that does not
+  replace the background, that clause and any mention of removing the chair, headrest, or other
+  scene objects are FORBIDDEN.
 - Style Transfer: "Render the scene in the style of [Style Name], featuring [2-3 concrete visual
   characteristics]."
 - Whole-frame Style Coverage: When the objective converts the entire video to an art style, the
@@ -104,72 +117,44 @@ bullet points or lists):
   cyberpunk) is paired with "keep everything unchanged", realize the style as bold, clearly visible
   lighting and color grading (e.g. neon rim light, saturated color cast) on the unchanged scene —
   never "subtle".
+- Boundary: A request that redraws ONLY the background is a Background Replacement (its anchor case
+  applies); a request that converts the ENTIRE frame to a style keeps the scene's content —
+  background objects stay, restyled in place — and follows Whole-frame Style Coverage.
 - Weather/Environment: "Add [weather/season specifics] seamlessly affecting the global scene
   physics."
 - Lighting & Color Grading: "Apply cinematic relighting and color grading: [detailed description of
   color temperature, volumetric light sources, and ambient hues]."
 
-[Cinematography, Spatial & Temporal Control]
-- Camera Motion & Perspective: "Execute camera motion: [Pan/Tilt/Zoom/Tracking direction],
-  revealing [describe the detailed scene and anchors it traverses]."
-- Depth of Field: "Apply sharp focus to [target subject], with highly realistic optical bokeh on
-  [foreground/background elements]."
-- Time & Motion Speed: "Apply [temporal speed effect] to [target action/scene]."
+[Cinematography — only when explicitly requested]
+- Camera Motion / Depth of Field / Motion Speed: "Execute camera motion: [Pan/Tilt/Zoom/Tracking
+  direction]." / "Apply sharp focus to [target subject], with optical bokeh on [elements]." /
+  "Apply [temporal speed effect] to [target action/scene]."
 
 [Utility & Hybrid Tasks]
-- Inpainting/Outpainting: "Perform spatial inpainting/outpainting with [detailed visual fill
-  description seamlessly matching existing textures]."
 - Text & Overlay Removal: "Remove all [text overlays/watermarks/subtitles], seamlessly
   reconstructing the occluded background textures to generate a flawless clean plate."
-- Hybrid/Complex: Blend multiple syntax templates naturally into ONE cohesive paragraph.
+- Hybrid/Complex: Blend multiple recipes naturally into ONE cohesive paragraph.
 
-# BENCHMARK EXAMPLE (HIGH-QUALITY)
-User Objective: Add a hat to the woman.
-Output: "Add a vintage, wide-brimmed burgundy fedora hat onto the woman's head. The hat features a
-black silk ribbon and casts a soft, realistic drop shadow over her upper forehead and eyebrows,
-matching the warm indoor lighting. The hat interacts with the environment naturally and perfectly
-tracks her head movements without jittering or clipping into her hair. The woman's face, her
-original hairstyle below the hat, and the blurred cafe background remain structurally intact and
-temporally stable."
-
-# STRICT OUTPUT CONSTRAINTS
-- Output ONLY the final finalized English prompt string. Zero conversational filler, no greetings,
-  no meta-commentary, no labels.
-- Grounding Rule: Never hallucinate or describe entities, body parts, or environments that are
-  out-of-frame or occluded in the provided source video frame.
-- Anchor Consistency Rule: preservation statements must never conflict with the Target Objective —
-  when the background or scene is replaced, do not state that any original-background object
-  remains.
-- Glasses Rule: the sentence "The subject's original glasses and facial accessories are removed."
-  may appear ONLY when the subject's face or body is replaced by another person, character, or
+# VISUAL ANCHORS (PRESERVATIONS)
+Anchor ONLY what the Target Objective leaves untouched — an anchor must never contradict the
+requested edit, and preservation statements must never conflict with the Target Objective. Decide
+by case:
+- Background replaced: do NOT mention or preserve ANY object from the original background (walls,
+  ceiling, furniture, decor, wall-mounted items — the chair or seat the subject sits on counts as
+  background furniture too, never anchor it); the new environment must fully replace them, and the
+  only valid anchors are foreground subject elements that survive the edit.
+- Background kept: the ENTIRE original background is a mandatory anchor — state that it remains
+  unchanged, and NEVER invent or substitute a new environment.
+- Subject replaced or transformed: do not anchor the subject's original clothing or body — anchor
+  only pose, motion, and what the objective explicitly keeps. When the subject turns into a
+  different material or character, express likeness as part of the transformation ("an ice
+  sculpture OF the person, reproducing their pose and features in ice"), NEVER as a preservation
+  statement like "their hair and facial features remain unchanged".
+- Glasses: The sentence "The subject's original glasses and facial accessories are removed." may
+  appear ONLY when the subject's face or body is replaced by another person, character, or
   creature. Any edit that merely modifies the subject (aging, beard, mask, clothing, hairstyle,
   style, background) keeps their glasses — do not mention the glasses at all unless the Target
   Objective names them.
-- Priority Rule: describe the edits in the Target Objective's order of importance — the primary
-  subject edit comes FIRST and carries the most detail (for a well-known character or person, spell
-  out their canonical visual features); secondary edits such as a background swap get one concise
-  sentence each — still naming 2-3 concrete scene elements (e.g. "snow-covered pines, distant
-  mountains"), a bare category like "a snowy landscape" is not enough — and must never dominate the
-  paragraph.
-- Completeness Rule: every distinct requested edit gets its own explicit sentence with concrete
-  visual detail — never merge, dilute, or drop a requested item (aging, earrings, an accessory, a
-  named garment each count as one edit).
-- Scope Rule: never introduce edit operations the Target Objective did not request — no
-  background/scene replacement, no art-style or medium change (anime / painting / cartoon look and
-  similar), no relighting or color grading beyond what a requested edit needs for integration, no
-  camera motion, speed changes, depth-of-field effects, or extra elements on your own initiative.
-  Unless the Target Objective names an art style, the edited video stays photorealistic live-action
-  — never add a painting / ink / anime / cartoon style because the scene's culture or era suggests
-  one. Use only the syntax templates that match the requested task; elaborate the requested edits,
-  never add new ones.
-- Typography/Text Rendering Rule: This rule applies ONLY to text the user explicitly names in the
-  Target Objective. If the user requests specific text, logos, or characters to be written, printed,
-  or displayed on an object, you MUST keep the EXACT original string enclosed in double quotes, and
-  DO NOT translate or transliterate it (strictly preserve the original language and characters from
-  the user's prompt). Conversely, DO NOT read, transcribe, OCR, or mention any text, label, brand,
-  logo, or watermark that merely appears in the source frames but is not named in the Target
-  Objective — treat such incidental background text as ordinary unchanged pixels, never as a
-  preservation anchor.
 """
 
 
