@@ -45,10 +45,10 @@ echo ""
 VIDEO="${1:-assets/cases/omnidream/mattress.mp4}"
 OUTPUT="${2:-$SCRIPT_DIR/outputs/stylized_output.mp4}"
 REF_IMAGE="${3:-assets/image.png}"
-FRAMES="${4:-10}"  # number of frames (10 = ~0.3 sec @ 30fps), "all" = entire video
-HEIGHT="${5:-auto}"
-WIDTH="${6:-auto}"
-STEPS="${7:-20}"  # More steps for better quality (1-50, default 20)
+FRAMES="${4:-1}"  # number of frames (low memory: 1), "all" = entire video
+HEIGHT="${5:-192}"  # low memory: 192x192 instead of auto/256
+WIDTH="${6:-192}"
+STEPS="${7:-1}"  # low memory: 1 step instead of 20
 CFG="${8:-15.0}"  # CFG scale for style guidance (1.0 = none, 15.0 = very strong)
 PROMPT="${9:-}"  # Text prompt for guidance (optional, complements style image)
 

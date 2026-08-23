@@ -59,11 +59,14 @@ def load_models(device):
     print("[2/5] Loading models (float16, memory-efficient)...")
     gc.collect()
 
-    # Verify quantized checkpoint exists
-    dit_ckpt_path = Path("dit_quantized.pth")
+    # Plain (non-quantized) checkpoint -- same default path run_server.sh uses.
+    dit_ckpt_path = Path(os.environ.get(
+        "JOYOMNI_DIT_CKPT",
+        "deploy/deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth",
+    ))
     if not dit_ckpt_path.exists():
-        print(f"ERROR: Quantized checkpoint not found: {dit_ckpt_path}")
-        print("Run: python quantize_simple.py <input> dit_quantized.pth")
+        print(f"ERROR: DiT checkpoint not found: {dit_ckpt_path}")
+        print("Set JOYOMNI_DIT_CKPT to the checkpoint path.")
         sys.exit(1)
 
     cfg = ExpConfig()
@@ -71,8 +74,7 @@ def load_models(device):
     cfg.dit_precision = "bf16"
     cfg.dit_ckpt = str(dit_ckpt_path)
 
-    # Load DiT with quantized checkpoint
-    print("  Loading DiT (quantized checkpoint, auto-dequantized to bf16)...")
+    print("  Loading DiT (bf16 checkpoint)...")
     mem_before_load = torch.cuda.memory_allocated() / 1e9
     mem_info("Before load_dit()")
 
