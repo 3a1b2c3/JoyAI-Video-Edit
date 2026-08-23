@@ -189,8 +189,10 @@ Use text descriptions only (no style image):
 
 Example:
 ```bash
-./run_text.sh assets/input.mp4 outputs/text_output.mp4 "beautiful landscape" 10 auto auto 20 7.5
+./run_text.sh assets/input.mp4 outputs/text_output.mp4 "watercolor painting" 10 auto auto 20 7.5
 ```
+
+**See [PROMPTS.md](PROMPTS.md) for extensive prompt examples and tips.**
 
 ### Python API
 
