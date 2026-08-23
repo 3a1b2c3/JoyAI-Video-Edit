@@ -1,34 +1,22 @@
-# Vendored weights, checkpoints, and compile cache (~117G, not for git)
+# Vendored weights, checkpoints, and compile cache
 deploy/deps/
 
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
-.ipynb_checkpoints/
 
-# OS / editor
-.DS_Store
-
-# Runtime artifacts (recordings, server logs)
+# Runtime artifacts
 deploy/recordings/
-deploy/server.log
-
-# Machine-local config and notes (never commit; may contain secrets)
-deploy/.env.local
-deploy.local.md
 
 # joyomni_ops build artifacts (compiled locally via pip install)
 deploy/joyomni_ops/build/
 deploy/joyomni_ops/**/*.so
-deploy/*.egg-info/
-deploy/joyomni_ops/*.egg-info/
 
-# Third-party build checkouts (SageAttention, cutlass — cloned locally, not vendored)
+# Third-party build checkouts (SageAttention, cutlass -> deploy/tmp/, see DEPLOYMENT.md §2)
 deploy/tmp/
-/cutlass/
 
-# Hugging Face Space staging + ZeroGPU engine (not part of the public release)
+# Hugging Face Space staging + ZeroGPU engine (never commit to the public repo)
 deploy/hf_space/
 deploy/xvideo/serving/zerogpu_engine.py
 .venv/

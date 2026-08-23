@@ -1,3 +1,5 @@
+import os
+
 import torch
 from transformers import Qwen2Tokenizer, Qwen2_5_VLForConditionalGeneration
 from loguru import logger
@@ -12,13 +14,40 @@ def load_text_encoder(
     text_encoder_ckpt: str,
     device: torch.device = torch.device("cpu"),
     torch_dtype: torch.dtype = torch.bfloat16,
+    cpu_offload: bool = False,
 ):
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         text_encoder_ckpt,
         dtype=torch_dtype,
         local_files_only=True,
         attn_implementation="sdpa",
-    ).to(device).eval().requires_grad_(False)
+    )
+    if cpu_offload:
+        # The 7B text encoder runs only at session start / KV reset, so it stays
+        # in CPU RAM and streams through the GPU during encode_prompt (~0 resident).
+        model = model.eval().requires_grad_(False)
+        from accelerate import cpu_offload as _accelerate_cpu_offload
+        from xvideo.lowvram import te_pin_memory_enabled
+
+        state_dict = None
+        if te_pin_memory_enabled():
+            try:
+                state_dict = {
+                    name: (tensor.pin_memory() if tensor.device.type == "cpu" else tensor)
+                    for name, tensor in model.state_dict().items()
+                }
+                logger.info("Text encoder offload: pinned host copy for faster H2D staging")
+            except RuntimeError as exc:
+                logger.warning(f"Text encoder offload: pin_memory failed ({exc!r}); using pageable RAM")
+                state_dict = None
+        _accelerate_cpu_offload(
+            model,
+            execution_device=torch.device(device),
+            state_dict=state_dict,
+        )
+        logger.info(f"Text encoder: sequential CPU offload enabled (execution device {device})")
+    else:
+        model = model.to(device).eval().requires_grad_(False)
     tokenizer = Qwen2Tokenizer.from_pretrained(
         text_encoder_ckpt,
         local_files_only=True,
@@ -42,11 +71,15 @@ def build_vae(cfg, device: torch.device):
 
 
 def load_pipeline(cfg, dit, device: torch.device):
+    from xvideo.lowvram import te_cpu_offload_enabled
+
     vae = build_vae(cfg, device)
 
+    te_offload = te_cpu_offload_enabled()
     tokenizer, text_encoder = load_text_encoder(
         torch_dtype=PRECISION_TO_TYPE[cfg.text_encoder_precision],
         device=device,
+        cpu_offload=te_offload,
         **_arch_params(cfg.text_encoder_arch_config),
     )
 
@@ -61,18 +94,27 @@ def load_pipeline(cfg, dit, device: torch.device):
         args=cfg,
         **_arch_params(cfg.pipeline_arch_config),
     )
+    if te_offload:
+        # DiffusionPipeline.to() refuses to move pipelines that contain a
+        # sequentially-offloaded model; place the remaining modules manually
+        # (the DiT is already on `device` from load_dit).
+        pipeline.vae.to(device)
+        return pipeline
     return pipeline.to(device)
 
 
 def load_dit(cfg, device: torch.device) -> torch.nn.Module:
+
     state_dict = None
     if cfg.dit_ckpt is not None:
         logger.info(f"Loading DiT checkpoint: {cfg.dit_ckpt}")
         # mmap=True memory-maps the (32+ GB) checkpoint instead of reading it all into
-        # CPU RAM, which OOM-kills (SIGKILL) on shared boxes. mmap requires
-        # map_location='cpu'; load_state_dict below copies the mapped tensors straight
-        # into the GPU model, so peak CPU RAM stays tiny.
-        state_dict = torch.load(cfg.dit_ckpt, map_location="cpu", weights_only=True, mmap=True)
+        # CPU RAM, which OOM-kills (SIGKILL) on shared boxes; load_state_dict below
+        # copies the mapped tensors straight into the GPU model, so peak CPU RAM stays
+        # tiny. Except on HF Spaces: /data is FUSE there, and mmap page faults crawl
+        # (hours for 30 GiB), so mmap is disabled in that environment specifically.
+        mmap_ok = "SPACE_ID" not in os.environ
+        state_dict = torch.load(cfg.dit_ckpt, map_location="cpu", weights_only=True, mmap=mmap_ok)
         if "model" in state_dict:
             state_dict = state_dict["model"]
 
@@ -108,10 +150,7 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
             if target is None:
                 unexpected.append(k)
                 continue
-            # dequantize int8 {data,scale}, else take the raw tensor
-            if isinstance(v, dict) and "data" in v:
-                v = v["data"].float() * v["scale"]
-            elif not isinstance(v, torch.Tensor):
+            if not isinstance(v, torch.Tensor):
                 continue
             v = v.to(dtype=dtype)  # convert dtype on CPU first
             if k == "img_in.weight" and target.shape != v.shape:

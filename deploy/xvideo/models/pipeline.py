@@ -228,26 +228,18 @@ class Pipeline(DiffusionPipeline):
         return prompt_embeds, prompt_embeds_mask
 
     def normalize_latents(self, latent: torch.Tensor):
-        if hasattr(self.vae.config, "latents_mean") and hasattr(self.vae.config, "latents_std"):
-            latents_mean = torch.tensor(self.vae.config.latents_mean).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latents_std = torch.tensor(self.vae.config.latents_std).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latent = (latent - latents_mean) / latents_std
-        else:
-            latent = latent * self.vae.config.scaling_factor
-        return latent
+        latents_mean = torch.tensor(self.vae.config.latents_mean).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        latents_std = torch.tensor(self.vae.config.latents_std).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        return (latent - latents_mean) / latents_std
 
     def denormalize_latents(self, latent: torch.Tensor):
-        if hasattr(self.vae.config, "latents_mean") and hasattr(self.vae.config, "latents_std"):
-            latents_mean = torch.tensor(self.vae.config.latents_mean).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latents_std = torch.tensor(self.vae.config.latents_std).view(
-                1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
-            latent = latent * latents_std + latents_mean
-        else:
-            latent = latent / self.vae.config.scaling_factor
-        return latent
+        latents_mean = torch.tensor(self.vae.config.latents_mean).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        latents_std = torch.tensor(self.vae.config.latents_std).view(
+            1, -1, 1, 1, 1).to(device=latent.device, dtype=latent.dtype)
+        return latent * latents_std + latents_mean
 
     def _sample_vae_latents(
         self,
@@ -396,7 +388,11 @@ class Pipeline(DiffusionPipeline):
         reference_image_latents: torch.Tensor,
         transformer_dtype: torch.dtype,
     ) -> None:
-        ref_img = reference_image_latents.to(device=self._execution_device, dtype=transformer_dtype)
+        # Not self._execution_device: with the text encoder sequentially
+        # offloaded, DiffusionPipeline.device can pick the offloaded module
+        # (meta device). The prefill runs on `model`, so use its device.
+        model_device = next(model.parameters()).device
+        ref_img = reference_image_latents.to(device=model_device, dtype=transformer_dtype)
         ref_frames = ref_img.shape[2]
         with model.cache_context("cond"):
             model(

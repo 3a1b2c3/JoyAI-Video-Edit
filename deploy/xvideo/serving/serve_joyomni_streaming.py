@@ -5,6 +5,7 @@ import asyncio
 import base64
 import io
 import json
+import math
 import os
 import queue
 import sys
@@ -363,7 +364,6 @@ def _person_present(image: Image.Image, *, onnx_path: str, conf: float) -> bool:
 def _enhance_prompt_sync(
     *,
     raw_prompt: str,
-    ref_image: Image.Image | None,
     pe_frame: Image.Image | None,
     pe_model: str | None,
 ) -> dict[str, Any]:
@@ -381,7 +381,6 @@ def _enhance_prompt_sync(
             task_type,
             raw_prompt,
             video=[pe_frame] if pe_frame is not None else None,
-            images=[ref_image] if ref_image is not None else None,
         )
         if isinstance(enhanced, str) and enhanced.strip():
             enhanced_prompt = enhanced.strip()
@@ -865,7 +864,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             _wire_chunk = h264_stream is not None or (
                 encoded_frames and isinstance(encoded_frames[0], (bytes, bytearray))
             )
-            _fps = float(getattr(session_settings, "fps", None) or args.fps or 24.0)
+            _fps = float(args.fps)
             _outstanding = None
             if _wire_chunk and flow["recv"] is not None and (time.time() - flow["at"]) < 5.0:
                 _outstanding = max(0, (frames_out - int(flow.get("base") or 0)) - int(flow["recv"]))
@@ -1396,9 +1395,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         fg_stable = max(1, int(round(fg_stable * _fscale)))
                         fg_absent = max(1, int(round(fg_absent * _fscale)))
                         fg_return = max(1, int(round(fg_return * _fscale)))
-                        count_change_frames = max(1, int(round(int(args.person_count_change_frames) * _fscale)))
                         body_flip_frames = max(1, int(round(int(args.person_body_flip_frames) * _fscale)))
-                        person_stride = max(1, int(round(int(args.person_check_stride) * _fscale)))
+                        person_stride = max(1, math.ceil(int(args.person_check_stride) * _fscale))
+                        count_change_checks = max(1, int(round(int(args.person_count_change_frames) * _fscale / person_stride)))
                         gate_move_eps = float(args.face_gate_move_eps) / _fscale
                         gate_state["count"] = 0
                         gate_state["cx"] = None
@@ -1714,8 +1713,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
                     if gate_on and not face_gate_pending:
                         _tick = gate_state.get("person_check_i", 0)
-                        _gfaces, _gfw, _gfh = _detect_gate_faces(frame, onnx_path=args.face_detector_onnx, score_thresh=fg_score)
-                        if _tick == 0 or gate_state.get("absent_hold"):
+                        _fresh = _tick == 0 or gate_state.get("absent_hold")
+                        if _fresh:
+                            _gfaces, _gfw, _gfh = _detect_gate_faces(frame, onnx_path=args.face_detector_onnx, score_thresh=fg_score)
                             gate_state["person_last"] = _person_present(
                                 frame, onnx_path=args.person_detector_onnx, conf=float(args.person_gate_conf))
 
@@ -1767,37 +1767,38 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         if gate_state.get("absent_hold"):
                             return ("__no_person__", gate_state.get("hold_reason", "no_person"))
 
-                        _n = _count_faces_from(
-                            _gfaces, _gfw, _gfh,
-                            count_min_ratio=float(args.count_face_min_ratio))
-                        if gate_state["subject_count"] is None:
-                            gate_state["subject_count"] = _n
-                            gate_state["cand"] = None
-                            gate_state["cand_n"] = 0
-                        elif _n > gate_state["subject_count"]:
-                            if _n == gate_state["cand"]:
-                                gate_state["cand_n"] += 1
-                            else:
-                                gate_state["cand"] = _n
-                                gate_state["cand_n"] = 1
-                            if gate_state["cand_n"] >= count_change_frames:
-                                gate_state["recount"] = True
+                        if _fresh:
+                            _n = _count_faces_from(
+                                _gfaces, _gfw, _gfh,
+                                count_min_ratio=float(args.count_face_min_ratio))
+                            if gate_state["subject_count"] is None:
                                 gate_state["subject_count"] = _n
                                 gate_state["cand"] = None
                                 gate_state["cand_n"] = 0
-                        elif _n < gate_state["subject_count"]:
-                            if _n == gate_state["cand"]:
-                                gate_state["cand_n"] += 1
+                            elif _n > gate_state["subject_count"]:
+                                if _n == gate_state["cand"]:
+                                    gate_state["cand_n"] += 1
+                                else:
+                                    gate_state["cand"] = _n
+                                    gate_state["cand_n"] = 1
+                                if gate_state["cand_n"] >= count_change_checks:
+                                    gate_state["recount"] = True
+                                    gate_state["subject_count"] = _n
+                                    gate_state["cand"] = None
+                                    gate_state["cand_n"] = 0
+                            elif _n < gate_state["subject_count"]:
+                                if _n == gate_state["cand"]:
+                                    gate_state["cand_n"] += 1
+                                else:
+                                    gate_state["cand"] = _n
+                                    gate_state["cand_n"] = 1
+                                if gate_state["cand_n"] >= count_change_checks:
+                                    gate_state["subject_count"] = _n
+                                    gate_state["cand"] = None
+                                    gate_state["cand_n"] = 0
                             else:
-                                gate_state["cand"] = _n
-                                gate_state["cand_n"] = 1
-                            if gate_state["cand_n"] >= count_change_frames:
-                                gate_state["subject_count"] = _n
                                 gate_state["cand"] = None
                                 gate_state["cand_n"] = 0
-                        else:
-                            gate_state["cand"] = None
-                            gate_state["cand_n"] = 0
 
                     if pe_defer and not face_gate_pending:
                         gate_state["pe_anchor"] = frame
@@ -1876,13 +1877,13 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         gate_state["pe_anchor"] = None
                         await _send_json({"type": "pe_running", "frames_in": frames_in})
 
-                        async def _run_pe(_sess=session, _anchor=anchor, _raw=raw_session_prompt, _ref=ref_image):
+                        async def _run_pe(_sess=session, _anchor=anchor, _raw=raw_session_prompt):
                             nonlocal pe_defer, pe_report, pe_task
                             try:
                                 report = await asyncio.wait_for(
                                     asyncio.to_thread(
                                         _enhance_prompt_sync,
-                                        raw_prompt=_raw, ref_image=_ref,
+                                        raw_prompt=_raw,
                                         pe_frame=_anchor, pe_model=args.pe_model,
                                     ),
                                     timeout=max(1.0, float(args.pe_timeout_s)),
@@ -1985,7 +1986,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vae-ckpt", type=str, default=None, help="Override VAE checkpoint dir (else uses the config default).")
     parser.add_argument("--text-encoder-ckpt", type=str, default=None, help="Override text-encoder checkpoint dir (else uses the config default).")
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--vae-device", type=str, default=None)
     parser.add_argument("--vae-encode-device", type=str, default=None)
@@ -2030,7 +2031,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Downlink transport. 'auto' honors browser h264 (saves bandwidth; display-only, does not affect generated identity). 'mjpeg' forces JPEG. Default auto.")
     parser.add_argument("--prompt", type=str, default="Keep the person and scene temporally consistent while applying the requested edit.")
     parser.add_argument("--profile-timings", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--kv-reset-frames", type=int, default=1080)
+    parser.add_argument("--kv-reset-frames", type=int, default=600)
     parser.add_argument("--max-temporal-ids", type=int, default=None)
     parser.add_argument("--freeze-kv-on-static", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--static-diff-thresh", type=float, default=0.5)
@@ -2055,6 +2056,9 @@ def main() -> None:
     from xvideo.inductor_autotune_fix import install as _install_autotune_fix
     _install_autotune_fix()
     args = parse_args()
+    # JOYOMNI_VRAM_CAP_GB (testing): cap the allocator to emulate a smaller card.
+    from xvideo.lowvram import apply_vram_cap_for_testing
+    apply_vram_cap_for_testing(args.device)
     app = create_app(args)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info", ws_max_size=32 * 1024 * 1024, ws_per_message_deflate=False, loop="uvloop")
 

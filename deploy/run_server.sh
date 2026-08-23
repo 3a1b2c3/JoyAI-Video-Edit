@@ -3,13 +3,6 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ -f "$HERE/.env.local" ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$HERE/.env.local"
-  set +a
-fi
-
 JOYOMNI_CONDA_SH="${JOYOMNI_CONDA_SH:-}"
 JOYOMNI_CONDA_ENV="${JOYOMNI_CONDA_ENV:-}"
 if [ -n "$JOYOMNI_CONDA_ENV" ]; then
@@ -26,9 +19,10 @@ fi
 
 cd "$HERE"
 
-export TORCHINDUCTOR_CACHE_DIR="$HERE/deps/cache/torchinductor"
-export TRITON_CACHE_DIR="$HERE/deps/cache/triton"
-export CUDA_CACHE_PATH="$HERE/deps/cache/nv_compute"
+JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$HERE/deps/cache}"
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-$JOYOMNI_CACHE_ROOT/torchinductor}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-$JOYOMNI_CACHE_ROOT/triton}"
+export CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-$JOYOMNI_CACHE_ROOT/nv_compute}"
 export TORCHINDUCTOR_FX_GRAPH_CACHE=1
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 mkdir -p "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR" "$CUDA_CACHE_PATH"
@@ -39,8 +33,14 @@ export PYTHONPATH="$HERE"
 export JOYOMNI_FP8_IMG="${JOYOMNI_FP8_IMG:-1}"
 export JOYOMNI_FP8_TXT="${JOYOMNI_FP8_TXT:-1}"
 export JOYOMNI_CUDA_GRAPH="${JOYOMNI_CUDA_GRAPH:-1}"
-export JOYOMNI_SAGE_ATTN="${JOYOMNI_SAGE_ATTN:-1}"
-export JOYOMNI_TXT_PARALLEL="${JOYOMNI_TXT_PARALLEL:-1}"
+export JOYOMNI_SAGE_ATTN="${JOYOMNI_SAGE_ATTN:-0}"
+export JOYOMNI_FP8_FAST_ACCUM="${JOYOMNI_FP8_FAST_ACCUM:-0}"
+export JOYOMNI_LOW_VRAM="${JOYOMNI_LOW_VRAM:-0}"
+
+# Prompt enhancement (empty -> disabled, the raw user prompt is used as-is)
+export PE_MODEL="${PE_MODEL:-}"
+export OPENAI_BASE_URL="${OPENAI_BASE_URL:-}"
+export OPENAI_API_KEY="${OPENAI_API_KEY:-}"
 
 RECORD_ARGS=()
 if [ "${JOYOMNI_RECORD_ENABLED:-1}" = "1" ]; then

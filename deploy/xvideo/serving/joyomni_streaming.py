@@ -156,6 +156,34 @@ def _load_vae_for_device(cfg: ExpConfig, device: torch.device) -> torch.nn.Modul
     vae.eval()
     return vae
 
+
+def _canonical_device(device: torch.device | str) -> torch.device:
+    device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", torch.cuda.current_device())
+    return device
+
+
+def _clone_vae_shared_weights(src: torch.nn.Module) -> torch.nn.Module:
+    """A second VAE handle sharing `src`'s weight tensors.
+
+    The VAE keeps per-call streaming state on the instance, so each role needs
+    its own module object -- but weights can be shared. Conv weights are
+    converted to channels_last_3d up-front: vae_compile converts per instance,
+    and Tensor.to(memory_format=...) returns self once the layout already
+    matches, so every clone keeps sharing storage.
+    """
+    from xvideo.models.vae import XVAEChunkCausal
+
+    for m in src.modules():
+        if isinstance(m, torch.nn.Conv3d):
+            m.weight.data = m.weight.data.to(memory_format=torch.channels_last_3d)
+    with torch.device("meta"):
+        clone = XVAEChunkCausal.from_config(src.config)
+    clone.load_state_dict(src.state_dict(), assign=True)
+    clone.requires_grad_(False)
+    return clone.eval()
+
 class JoyOmniRuntime:
     def __init__(
         self,
@@ -206,6 +234,9 @@ class JoyOmniRuntime:
         postprocess_device_obj = torch.device(postprocess_device) if postprocess_device is not None else vae_pseudo_device_obj
         seed_everything(seed)
 
+        from xvideo.lowvram import log_mode
+        log_mode()
+
         cfg = ExpConfig()
         if vae_ckpt is not None:
             cfg.vae_arch_config["pretrained"] = vae_ckpt
@@ -221,14 +252,8 @@ class JoyOmniRuntime:
         dit.requires_grad_(False)
         dit.eval()
 
-        try:
-            from xvideo.models.dit import warmup_attention_backend as _warmup_fa
-            _heads = int(getattr(dit.config, "heads_num", 0) or 0)
-            _hidden = int(getattr(dit.config, "hidden_size", 0) or 0)
-            if _heads > 0 and _hidden > 0:
-                _warmup_fa(_heads, _hidden // _heads, device=device_obj)
-        except Exception as _fa_exc:  # noqa: BLE001
-            print(f"#####[STREAM] FA4 warmup skipped: {_fa_exc!r}")
+        from xvideo.models.dit import attention_backend
+        print(f"#####[STREAM] attention backend: {attention_backend()}", flush=True)
 
         pipeline = load_pipeline(cfg, dit, device_obj)
         pipeline.vae.requires_grad_(False)
@@ -237,14 +262,24 @@ class JoyOmniRuntime:
             pipeline.vae = pipeline.vae.to(vae_encode_device_obj)
             print(f"#####[STREAM] moved encode VAE to {vae_encode_device_obj}")
 
-        decode_vae = pipeline.vae
+        def _vae_for_role(role: str, target_device: torch.device) -> torch.nn.Module:
+            target = _canonical_device(target_device)
+            for share_src in (pipeline.vae, decode_vae):
+                if share_src is not None and _canonical_device(_module_device(share_src)) == target:
+                    print(f"#####[STREAM] {role} VAE shares weights on {target_device}")
+                    return _clone_vae_shared_weights(share_src)
+            vae = _load_vae_for_device(cfg, target_device)
+            print(f"#####[STREAM] loaded {role} VAE on {target_device}")
+            return vae
+
+        decode_vae = None
         if vae_decode_device_obj is not None:
-            decode_vae = _load_vae_for_device(cfg, vae_decode_device_obj)
-            print(f"#####[STREAM] loaded decode VAE on {vae_decode_device_obj}")
+            decode_vae = _vae_for_role("decode", vae_decode_device_obj)
+        if decode_vae is None:
+            decode_vae = pipeline.vae
         pseudo_encode_vae = decode_vae
         if vae_pseudo_device_obj is not None:
-            pseudo_encode_vae = _load_vae_for_device(cfg, vae_pseudo_device_obj)
-            print(f"#####[STREAM] loaded pseudo encode VAE on {vae_pseudo_device_obj}")
+            pseudo_encode_vae = _vae_for_role("pseudo encode", vae_pseudo_device_obj)
 
         if hasattr(pipeline, "set_progress_bar_config"):
             pipeline.set_progress_bar_config(disable=True)
@@ -327,6 +362,16 @@ class JoyOmniRuntime:
         except Exception as _wexc:
             print(f"#####[STREAM] full-pipeline warmup error (non-fatal): {_wexc!r}")
 
+        if device_obj.type == "cuda":
+            _free_b, _total_b = torch.cuda.mem_get_info(device_obj)
+            print(
+                f"#####[STREAM] runtime loaded; device memory used "
+                f"{(_total_b - _free_b) / 2**30:.1f}/{_total_b / 2**30:.1f} GiB "
+                f"(torch reserved {torch.cuda.memory_reserved(device_obj) / 2**30:.1f} GiB, "
+                f"allocated {torch.cuda.memory_allocated(device_obj) / 2**30:.1f} GiB)",
+                flush=True,
+            )
+
         return runtime
 
     def create_v2v_session(
@@ -404,8 +449,6 @@ class JoyOmniRuntime:
                     session.close()
                 except Exception:
                     pass
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
 class JoyOmniV2VStreamingSession:
     _session_serial_counter = 0
@@ -593,8 +636,8 @@ class JoyOmniV2VStreamingSession:
         self._clear_vae_feature_caches()
         self.pipeline.transformer.reset_inference_kv_cache()
         self._stop_async_workers()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # No empty_cache: keep the freed KV/graph blocks cached in the allocator
+        # so the next session's pools reuse them instead of fresh cudaMallocs.
 
     @torch.no_grad()
     def _initialize(self, first_frame: Image.Image) -> None:
@@ -661,7 +704,7 @@ class JoyOmniV2VStreamingSession:
             num_items=1,
             return_bucket=True,
         )
-        pixel = torch.from_numpy(np.asarray(resized_image))
+        pixel = torch.from_numpy(np.array(resized_image))
         pixel = rearrange(pixel, "h w c -> c h w")
         if pixel.dtype != torch.uint8:
             pixel = pixel.clamp(0, 255).to(torch.uint8)
@@ -830,7 +873,8 @@ class JoyOmniV2VStreamingSession:
             while len(live_keys) >= _GRAPH_CACHE_CAP:
                 del cache[live_keys.pop(0)]
             cache.pop(key, None)
-            torch.cuda.empty_cache()
+            # No empty_cache: the evicted runner's freed blocks are reused for the
+            # new static bufs; returning them to the driver only slows recapture.
             pos_table_ids = torch.arange(int(mti), device=self.device, dtype=torch.long)
             latent_shape = (1, self.latent_channels, self.chunk_size, self.latent_h, self.latent_w)
             runner = StreamingGraphRunner(
@@ -988,9 +1032,6 @@ class JoyOmniV2VStreamingSession:
         if cached_temporal_ids.numel() == 0:
             cached_temporal_ids = None
 
-        self.pipeline.scheduler.set_timesteps(self.settings.num_inference_steps, device=self.device)
-        timesteps_for_chunk = self.pipeline.scheduler.timesteps
-
         runner = self._graph_runner_for_chunk(
             chunk_idx=chunk_idx,
             selected_chunk_ids=selected_chunk_ids,
@@ -1005,6 +1046,9 @@ class JoyOmniV2VStreamingSession:
                 history_chunk_ids=history_chunk_ids,
                 active_chunk_id=active_chunk_id,
             )
+
+        self.pipeline.scheduler.set_timesteps(self.settings.num_inference_steps, device=self.device)
+        timesteps_for_chunk = self.pipeline.scheduler.timesteps
 
         for timestep in timesteps_for_chunk:
             autocast_context = _autocast_ctx(
@@ -1157,12 +1201,28 @@ class JoyOmniV2VStreamingSession:
         self._postprocess_queue = queue.Queue(maxsize=4)
         self._result_queue = queue.Queue()
         use_streams = torch.cuda.is_available()
-        self._encode_stream = torch.cuda.Stream() if use_streams else None
-        _bg = torch.cuda.Stream() if use_streams else None
+
+        def _stream_for(module_or_device, **kw):
+            # Streams must live on the device their kernels run on; a cuda:0
+            # stream running cuda:1 work raises cudaErrorInvalidResourceHandle.
+            if not use_streams:
+                return None
+            dev = module_or_device
+            if isinstance(dev, torch.nn.Module):
+                dev = _module_device(dev)
+            dev = torch.device(dev)
+            if dev.type != "cuda":
+                return None
+            return torch.cuda.Stream(device=dev, **kw)
+
+        self._encode_stream = _stream_for(self.pipeline.vae)
+        _dec_dev = _module_device(self.decode_vae)
+        _bg = _stream_for(_dec_dev)
         self._decode_stream = _bg
-        self._pseudo_stream = _bg
-        self._post_stream = torch.cuda.Stream() if use_streams else None
-        self._dit_stream = torch.cuda.Stream(priority=-1) if use_streams else None
+        _ps_dev = _module_device(self.pseudo_encode_vae)
+        self._pseudo_stream = _bg if _canonical_device(_ps_dev) == _canonical_device(_dec_dev) else _stream_for(_ps_dev)
+        self._post_stream = _stream_for(self.postprocess_device)
+        self._dit_stream = _stream_for(self.device, priority=-1)
         self._workers = [
             threading.Thread(target=self._encode_worker, name="joyomni-vae-encode", daemon=True),
             threading.Thread(target=self._dit_worker, name="joyomni-dit-denoise", daemon=True),
