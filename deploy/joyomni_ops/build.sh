@@ -7,7 +7,7 @@
 #   - PyTorch with CUDA support
 #
 # If build fails or fp8 is not needed, use:
-#   JOYOMNI_OPS_NO_FP8=1 python -m pip install -e .
+#   JOYOMNI_OPS_NO_FP8=1 python -m pip install -e . --no-build-isolation
 
 set -euo pipefail
 
@@ -87,7 +87,7 @@ if ! command -v nvcc &>/dev/null; then
     echo "  export PATH=/usr/local/cuda-12.x/bin:\$PATH"
     echo ""
     echo "Alternatively, build without FP8:"
-    echo "  JOYOMNI_OPS_NO_FP8=1 python -m pip install -e ."
+    echo "  JOYOMNI_OPS_NO_FP8=1 python -m pip install -e . --no-build-isolation"
     exit 1
 fi
 
@@ -130,6 +130,23 @@ echo "[4/4] Building joyomni_ops (fp8 enabled)..."
 export JOYOMNI_OPS_CUTLASS_DIR="$HERE/cutlass"
 unset JOYOMNI_OPS_NO_FP8 2>/dev/null || true
 
+# Cutlass FP8 template compiles can legitimately run 10+ min per file, so there's no
+# safe timeout to kill on -- instead log compiler-process state + object-file growth
+# every 30s in the background, so a real hang (vs. just-slow) is diagnosable from the
+# log afterward without needing to interrupt an in-progress build to check.
+(
+    while true; do
+        sleep 30
+        {
+            echo "--- watchdog $(date +%H:%M:%S) ---"
+            ps -eo pid,stat,etime,cmd 2>/dev/null | grep -E "cicc|ptxas|cc1plus|nvcc" | grep -v grep
+            ls -la /tmp/tmp*.build-temp/csrc/*.o 2>/dev/null
+        } >> "$LOG_FILE"
+    done
+) &
+WATCHDOG_PID=$!
+trap 'kill "$WATCHDOG_PID" 2>/dev/null' EXIT
+
 if ! VERBOSE=1 "$PYTHON" -m pip install -e . --no-build-isolation --force-reinstall -v 2>&1 | tee -a "$LOG_FILE"; then
     echo ""
     echo "ERROR: Build failed. See build.log for details."
@@ -142,7 +159,7 @@ if ! VERBOSE=1 "$PYTHON" -m pip install -e . --no-build-isolation --force-reinst
     tail -50 "$LOG_FILE" | sed 's/^/    /'
     echo ""
     echo "If FP8 is not needed, build without it:"
-    echo "  JOYOMNI_OPS_NO_FP8=1 $PYTHON -m pip install -e ."
+    echo "  JOYOMNI_OPS_NO_FP8=1 $PYTHON -m pip install -e . --no-build-isolation"
     exit 1
 fi
 
@@ -211,7 +228,15 @@ else
         # elsewhere on disk is shadowing the fresh build.
         echo "-- PyInit__C diagnostics (for 'dynamic module does not define module export function') --"
         echo "pybind module macro:"
-        grep -n "PYBIND11_MODULE\|TORCH_EXTENSION_NAME" csrc/pybind.cpp 2>&1 | sed 's/^/  /'
+        PYBIND_MACRO="$(grep -n "PYBIND11_MODULE\|TORCH_EXTENSION_NAME" csrc/pybind.cpp 2>&1)"
+        if [ -z "$PYBIND_MACRO" ]; then
+            echo "  MISSING: csrc/pybind.cpp has no PYBIND11_MODULE/TORCH_EXTENSION_NAME text at all --"
+            echo "  this is why no PyInit__C symbol is ever generated, however cleanly the rest compiles."
+            echo "  Full file (so the actual registration mechanism, if any, is visible):"
+            sed 's/^/    /' csrc/pybind.cpp
+        else
+            echo "$PYBIND_MACRO" | sed 's/^/  /'
+        fi
         SO_PATH="$HERE/joyomni_ops/_C$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))' 2>/dev/null)"
         echo "expected .so: $SO_PATH"
         ls -la "$SO_PATH" 2>&1 | sed 's/^/  /'
@@ -224,6 +249,6 @@ else
     } 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
     echo ""
     echo "Workaround (build without FP8, only if the above doesn't point to a fixable cause):"
-    echo "  JOYOMNI_OPS_NO_FP8=1 $PYTHON -m pip install -e . --force-reinstall"
+    echo "  JOYOMNI_OPS_NO_FP8=1 $PYTHON -m pip install -e . --no-build-isolation --force-reinstall"
     exit 1
 fi

@@ -51,12 +51,26 @@ if [ $FAILED -eq 0 ]; then
 fi
 echo ""
 
-# Test 3: joyomni_ops installed
+# Test 3: joyomni_ops installed as a real package (not a namespace-package shadow)
+# with its FP8 functions actually importable. A bare `import joyomni_ops` succeeds
+# even when a stray joyomni_ops/ source dir shadows the real install or the compiled
+# _C extension is broken/missing -- both have bitten this repo before, so check for
+# real -- exact interpreter used to run infer_standalone.py/the server.
 echo "[3/6] joyomni_ops module..."
-if python -c "import joyomni_ops; print('  ✓ Installed')" 2>/dev/null; then
+JOYOMNI_CHECK=$(python -c "
+import joyomni_ops
+assert getattr(joyomni_ops, '__file__', None), 'resolved as a namespace package (no __file__) -- not a real install'
+from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
+from joyomni_ops._C import fp8_scaled_mm, sgl_per_token_quant_fp8
+print(joyomni_ops.__file__)
+" 2>&1)
+if [ $? -eq 0 ]; then
+    echo "  ✓ Installed with FP8 support ($JOYOMNI_CHECK)"
     ((PASSED++))
 else
-    echo "  ✗ Not installed. Run: cd deploy/joyomni_ops && JOYOMNI_OPS_NO_FP8=1 pip install -e ."
+    echo "  ✗ joyomni_ops broken under $(python -c 'import sys; print(sys.executable)'):"
+    echo "$JOYOMNI_CHECK" | sed 's/^/    /'
+    echo "  Run: cd deploy/joyomni_ops && PYTHON=$(python -c 'import sys; print(sys.executable)') bash build.sh"
     ((FAILED++))
 fi
 echo ""
