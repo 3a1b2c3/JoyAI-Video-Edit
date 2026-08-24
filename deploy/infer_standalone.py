@@ -64,9 +64,16 @@ def main():
     print("[1/4] Loading models...")
     cfg = ExpConfig()
     cfg.training_mode = False
-    cfg.dit_ckpt = os.environ.get("JOYOMNI_DIT_CHECKPOINT", "deploy/deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
-    cfg.vae_arch_config['pretrained'] = os.environ.get("JOYOMNI_VAE_CHECKPOINT", "deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
-    cfg.text_encoder_arch_config['params']['text_encoder_ckpt'] = os.environ.get("JOYOMNI_TEXT_ENCODER_CHECKPOINT", "deploy/deps/checkpoints/MiMo-VL-7B-RL-2508")
+
+    # Set checkpoint paths
+    repo_root = Path(__file__).parent.parent
+    cfg.dit_ckpt = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
+    cfg.vae_arch_config['pretrained'] = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
+    cfg.text_encoder_arch_config['params']['text_encoder_ckpt'] = str(repo_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
+
+    print(f"  DiT: {cfg.dit_ckpt}")
+    print(f"  VAE: {cfg.vae_arch_config['pretrained']}")
+    print(f"  TextEnc: {cfg.text_encoder_arch_config['params']['text_encoder_ckpt']}")
 
     runtime = JoyOmniRuntime.load(cfg, device=device)
     print(f"✓ Models loaded on {device}")
