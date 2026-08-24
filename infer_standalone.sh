@@ -9,11 +9,14 @@ cd "$SCRIPT_DIR"
 
 # Argument validation
 if [ $# -lt 2 ]; then
-    echo "Usage: bash infer_standalone.sh <prompt> <input_video> [output_path]"
+    echo "Usage: bash infer_standalone.sh <prompt> <input_video> [output_path] [--image style.jpg]"
     echo ""
     echo "  prompt          : text prompt for style/content"
     echo "  input_video     : path to input MP4/WebM"
     echo "  output_path     : where to save gen.mp4 (default: ./output_$(date +%s).mp4)"
+    echo ""
+    echo "Optional:"
+    echo "  --image <path>  : reference/style image for conditioning"
     exit 1
 fi
 
@@ -93,10 +96,18 @@ mkdir -p "$JOYOMNI_CACHE_ROOT"
 
 echo ""
 echo "Running inference..."
+
+# Handle optional --image flag
+IMAGE_ARG=""
+if [ $# -ge 4 ] && [ "$4" = "--image" ] && [ -n "${5:-}" ]; then
+    IMAGE_ARG="--image $5"
+fi
+
 python deploy/infer_standalone.py \
     --prompt "$PROMPT" \
     --input_video "$INPUT_VIDEO" \
-    --output "$OUTPUT_PATH"
+    --output "$OUTPUT_PATH" \
+    $IMAGE_ARG
 
 if [ $? -eq 0 ]; then
     echo ""
