@@ -62,20 +62,20 @@ def main():
 
     # Load runtime (same as server uses)
     print("[1/4] Loading models...")
-    cfg = ExpConfig()
-    cfg.training_mode = False
 
     # Set checkpoint paths
     repo_root = Path(__file__).parent.parent
-    cfg.dit_ckpt = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
-    cfg.vae_arch_config['pretrained'] = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
-    cfg.text_encoder_arch_config['params']['text_encoder_ckpt'] = str(repo_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
+    dit_ckpt = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
+    vae_ckpt = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
+    text_encoder_ckpt = str(repo_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
 
-    print(f"  DiT: {cfg.dit_ckpt}")
-    print(f"  VAE: {cfg.vae_arch_config['pretrained']}")
-    print(f"  TextEnc: {cfg.text_encoder_arch_config['params']['text_encoder_ckpt']}")
-
-    runtime = JoyOmniRuntime.load(cfg, device=device)
+    runtime = JoyOmniRuntime.load(
+        dit_ckpt=dit_ckpt,
+        vae_ckpt=vae_ckpt,
+        text_encoder_ckpt=text_encoder_ckpt,
+        device=device,
+        seed=args.seed,
+    )
     print(f"✓ Models loaded on {device}")
     print()
 
