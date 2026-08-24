@@ -100,6 +100,16 @@ esac
 
 mkdir -p "$JOYOMNI_CACHE_ROOT"
 
+# Persist torch.compile/Triton's autotuned kernel choices across runs -- without this,
+# every run re-benchmarks every AUTOTUNE convolution/mm from scratch (dozens of them,
+# ~1-6s each), which is most of the multi-minute VAE-compile warmup time. Same vars
+# deploy/run_server.sh already sets; this script was missing them entirely.
+export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-$JOYOMNI_CACHE_ROOT/torchinductor}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-$JOYOMNI_CACHE_ROOT/triton}"
+export CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-$JOYOMNI_CACHE_ROOT/nv_compute}"
+export TORCHINDUCTOR_FX_GRAPH_CACHE=1
+mkdir -p "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR" "$CUDA_CACHE_PATH"
+
 echo ""
 echo "Running inference..."
 
