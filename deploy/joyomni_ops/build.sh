@@ -14,9 +14,25 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
+# Build against whichever interpreter will actually run inference. A .so built
+# for one CPython version/ABI is silently unimportable under another: pip
+# install then fails to register a real package, and `import joyomni_ops`
+# falls back to resolving a bare namespace package from the source checkout
+# instead (ImportError: "... (unknown location)").
+PYTHON="${PYTHON:-python}"
+if ! command -v "$PYTHON" &>/dev/null; then
+    echo "ERROR: interpreter '$PYTHON' not found."
+    echo "  Set PYTHON=/path/to/python3.x to point at the venv you run inference with."
+    exit 1
+fi
+
 echo "=========================================="
 echo "Building joyomni_ops with FP8 support"
 echo "=========================================="
+echo ""
+echo "Using interpreter: $("$PYTHON" -c 'import sys; print(sys.executable)')"
+echo "Python version:    $("$PYTHON" --version 2>&1)"
+echo "Target ABI tag:    $("$PYTHON" -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))')"
 echo ""
 
 # Check CUDA is available
@@ -71,7 +87,7 @@ echo "[4/4] Building joyomni_ops (fp8 enabled)..."
 export JOYOMNI_OPS_CUTLASS_DIR="$HERE/cutlass"
 unset JOYOMNI_OPS_NO_FP8 2>/dev/null || true
 
-if ! python -m pip install -e . --no-build-isolation --force-reinstall 2>&1 | tee build.log; then
+if ! "$PYTHON" -m pip install -e . --no-build-isolation --force-reinstall 2>&1 | tee build.log; then
     echo ""
     echo "ERROR: Build failed. See build.log for details."
     echo ""
@@ -83,7 +99,7 @@ if ! python -m pip install -e . --no-build-isolation --force-reinstall 2>&1 | te
     tail -50 build.log | sed 's/^/    /'
     echo ""
     echo "If FP8 is not needed, build without it:"
-    echo "  JOYOMNI_OPS_NO_FP8=1 python -m pip install -e ."
+    echo "  JOYOMNI_OPS_NO_FP8=1 $PYTHON -m pip install -e ."
     exit 1
 fi
 
@@ -93,9 +109,28 @@ echo "✅ Build complete!"
 echo "=========================================="
 echo ""
 
+# Verify the install actually resolves to the real package under this
+# interpreter, not a namespace package pieced together from source dirs on
+# sys.path (the failure mode a version/ABI mismatch produces).
+echo "Verifying real package install..."
+if ! "$PYTHON" -c "
+import joyomni_ops
+if not getattr(joyomni_ops, '__file__', None):
+    raise ImportError('joyomni_ops resolved as a namespace package (no __file__) -- not a real install')
+from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
+print(f'  ✓ joyomni_ops loaded from {joyomni_ops.__file__}')
+"; then
+    echo ""
+    echo "ERROR: joyomni_ops installed but not importable as a real package under $PYTHON."
+    echo "  Likely a stray joyomni_ops/ directory earlier on sys.path shadowing the install,"
+    echo "  or the .so's Python ABI tag doesn't match this interpreter."
+    exit 1
+fi
+echo ""
+
 # Verify FP8 functions are available
 echo "Verifying FP8 functions..."
-if python -c "from joyomni_ops._C import fp8_scaled_mm, sgl_per_token_quant_fp8; print('  ✓ fp8_scaled_mm available'); print('  ✓ sgl_per_token_quant_fp8 available')" 2>&1; then
+if "$PYTHON" -c "from joyomni_ops._C import fp8_scaled_mm, sgl_per_token_quant_fp8; print('  ✓ fp8_scaled_mm available'); print('  ✓ sgl_per_token_quant_fp8 available')" 2>&1; then
     echo ""
     echo "✅ FP8 support verified!"
     exit 0
@@ -113,6 +148,6 @@ else
     echo "  3. Check CUDA:  nvcc --version && which nvcc"
     echo ""
     echo "Workaround (build without FP8):"
-    echo "  JOYOMNI_OPS_NO_FP8=1 python -m pip install -e . --force-reinstall"
+    echo "  JOYOMNI_OPS_NO_FP8=1 $PYTHON -m pip install -e . --force-reinstall"
     exit 1
 fi

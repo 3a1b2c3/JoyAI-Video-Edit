@@ -106,7 +106,18 @@ def run_v2v_generation(runtime, args, ref_image):
         raise RuntimeError("Generation produced no output frames")
 
     decoded.sort(key=lambda item: item[0])
-    return np.stack([frame for _, frame in decoded[: args.num_frames]])
+    frames = [frame for _, frame in decoded[: args.num_frames]]
+    _label_frames(frames)
+    return np.stack(frames)
+
+
+def _label_frames(frames):
+    """Burn a 1-based frame number into the top-left corner of each generated frame."""
+    for i, frame in enumerate(frames, start=1):
+        cv2.putText(
+            frame, str(i), (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA,
+        )
 
 
 def main():
