@@ -57,20 +57,17 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
 
-    # Load models directly (simpler than JoyOmniRuntime)
+    # Load via JoyOmniRuntime
     print("[1/4] Loading models...")
-    from xvideo.models.models import load_dit, load_pipeline, build_vae
-    from xvideo.config import ExpConfig
+    from xvideo.serving.joyomni_streaming import JoyOmniRuntime
 
     deploy_root = Path(__file__).parent
-    cfg = ExpConfig()
-    cfg.training_mode = False
-    cfg.dit_ckpt = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
-    cfg.vae_arch_config['pretrained'] = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
-    cfg.text_encoder_arch_config['params']['text_encoder_ckpt'] = str(deploy_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
-
-    dit = load_dit(cfg, device=device)
-    pipeline = load_pipeline(cfg, dit, device=device)
+    runtime = JoyOmniRuntime.load(
+        dit_ckpt=str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth"),
+        vae_ckpt=str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/vae"),
+        text_encoder_ckpt=str(deploy_root / "deps/checkpoints/MiMo-VL-7B-RL-2508"),
+        device=device,
+    )
     print(f"✓ Models loaded on {device}")
     print()
 
@@ -97,7 +94,7 @@ def main():
     # Generate
     print(f"[{step_num}/4] Generating...")
     with torch.no_grad():
-        output = pipeline.__call__(
+        output = runtime.pipeline(
             prompt=args.prompt,
             num_inference_steps=args.num_steps,
             guidance_scale=args.guidance_scale,
@@ -116,6 +113,7 @@ def main():
         frames = output
     import imageio.v3 as iio
     iio.imwrite(args.output, frames, fps=24)
+    print(f"✓ Saved: {args.output}")
 
     print()
     print("=" * 70)
