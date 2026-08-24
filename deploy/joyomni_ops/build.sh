@@ -262,6 +262,17 @@ else
         nm -D "$SO_PATH" 2>&1 | grep -i "PyInit\|undefined" | sed 's/^/  /'
         echo "symbols (objdump -T, catches what nm -D sometimes misses):"
         objdump -T "$SO_PATH" 2>&1 | grep -i PyInit | sed 's/^/  /'
+        # If PyInit__C is present here (full symtab) but absent from -D/-T above, the
+        # function exists but was compiled/linked as hidden-visibility -- present in
+        # the binary, just never exported for dynamic linking (Python's importer only
+        # looks at the dynamic table). If it's absent here too, pybind.cpp genuinely
+        # never generated it (macro missing/broken), a different root cause.
+        echo "symbols (nm without -D, full symtab -- present-but-hidden vs. never-generated):"
+        nm "$SO_PATH" 2>&1 | grep -i PyInit | sed 's/^/  /'
+        echo "pybind.cpp macro / visibility mentions:"
+        grep -n "PYBIND11_MODULE\|TORCH_EXTENSION_NAME\|visibility" csrc/pybind.cpp 2>&1 | sed 's/^/  /'
+        echo "setup.py -fvisibility flags:"
+        grep -n "fvisibility" setup.py 2>&1 | sed 's/^/  /'
         echo "other _C*.so files on disk (possible stale/shadowing copy):"
         # Scoped to $HERE + this interpreter's actual site-packages dirs, NOT a
         # filesystem-wide `find /` -- that can hang for minutes on a shared box and
