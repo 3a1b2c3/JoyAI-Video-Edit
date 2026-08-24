@@ -1742,13 +1742,18 @@ class JoyOmniV2VStreamingSession:
             decode_input = chunk_lat_flat
 
         _vc = _vae_compile_module()
-        _vc.maybe_setup_decode(decode_vae)
+        # dynamic=True path: chunk temporal size varies across the stream (warmup vs.
+        # steady chunks vs. a ragged tail chunk), which exhausts torch._dynamo's
+        # cache_size_limit on the static (dynamic=False) vae.decode and produces
+        # incorrect results instead of a clean recompile (AssertionError: temporal
+        # dim expected 1, got N). Mirrors the same fix already applied to VAE encode.
+        _vc.maybe_setup_decode_dynamic(decode_vae)
         decode_input = _vc.prep_input(decode_input)
 
         vae_ctx = _autocast_ctx(vae_device_type, self.vae_dtype, self.vae_autocast_enabled)
         with vae_ctx:
             started = self._timer_start(vae_device)
-            chunk_decoded = decode_vae.decode(decode_input, return_dict=False)[0]
+            chunk_decoded = _vc.decode_via_dynamic(decode_vae, decode_input, return_dict=False)[0]
             if profile is not None:
                 self._timer_record(profile, "vae_decode_s", started)
 

@@ -1,4 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
+
+import os
 
 import torch
 import torch.nn as nn
@@ -9,6 +11,15 @@ from xvideo.inductor_autotune_fix import install as _install_autotune_fix
 # on-disk autotune results instead of re-running coordinate descent.
 _install_autotune_fix()
 
+# max-autotune benchmarks many triton kernel variants per shape (the long
+# "AUTOTUNE convolution(...)" blocks) -- useful for production throughput, but slow
+# for iterating on a fix. Set JOYOMNI_DISABLE_AUTOTUNE=1 to compile with plain
+# "reduce-overhead" instead (still torch.compile'd, just no coordinate-descent search).
+_COMPILE_MODE = (
+    "reduce-overhead"
+    if os.environ.get("JOYOMNI_DISABLE_AUTOTUNE", "").lower() in {"1", "true", "yes", "on"}
+    else "max-autotune-no-cudagraphs"
+)
 
 _configured: set[int] = set()
 _configured_encode: set[int] = set()
@@ -24,10 +35,10 @@ def maybe_setup_decode(vae) -> None:
             m.weight.data = m.weight.data.to(memory_format=torch.channels_last_3d)
             n_conv += 1
     if hasattr(vae, "_decode"):
-        vae._decode = torch.compile(vae._decode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae._decode = torch.compile(vae._decode, mode=_COMPILE_MODE, dynamic=False)
         target = "_decode"
     elif hasattr(vae, "decode"):
-        vae.decode = torch.compile(vae.decode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae.decode = torch.compile(vae.decode, mode=_COMPILE_MODE, dynamic=False)
         target = "decode"
     else:
         raise RuntimeError("VAE has neither _decode nor decode; cannot compile")
@@ -48,10 +59,10 @@ def maybe_setup_encode(vae) -> None:
             m.weight.data = m.weight.data.to(memory_format=torch.channels_last_3d)
             n_conv += 1
     if hasattr(vae, "_encode"):
-        vae._encode = torch.compile(vae._encode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae._encode = torch.compile(vae._encode, mode=_COMPILE_MODE, dynamic=False)
         target = "_encode"
     elif hasattr(vae, "encode"):
-        vae.encode = torch.compile(vae.encode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae.encode = torch.compile(vae.encode, mode=_COMPILE_MODE, dynamic=False)
         target = "encode"
     else:
         raise RuntimeError("VAE has neither _encode nor encode; cannot compile")
@@ -93,9 +104,71 @@ def maybe_setup_encode_dynamic(vae) -> None:
         core = getattr(vae, "encode")
     else:
         raise RuntimeError("VAE has neither _encode nor encode; cannot compile")
-    vae._encode_dynamic = torch.compile(core, mode="max-autotune-no-cudagraphs", dynamic=True)
+    vae._encode_dynamic = torch.compile(core, mode=_COMPILE_MODE, dynamic=True)
     _configured_encode_dynamic.add(id(vae))
     print("[vae_compile] compiled vae._encode_dynamic (dynamic=True, reference-image path)")
+
+
+_configured_decode_dynamic: set[int] = set()
+
+
+def maybe_setup_decode_dynamic(vae) -> None:
+    """Same static-vs-dynamic split as maybe_setup_encode_dynamic, for decode. Chunk
+    sizes fed to decode vary across the streaming session (warmup, ragged tail chunks,
+    etc.), which exhausts torch._dynamo's per-code-object cache_size_limit on the
+    static (dynamic=False) vae._decode -- decode_via_dynamic avoids that."""
+    if id(vae) in _configured_decode_dynamic:
+        return
+    if hasattr(vae, "_decode"):
+        core = getattr(vae, "_decode")
+    elif hasattr(vae, "decode"):
+        core = getattr(vae, "decode")
+    else:
+        raise RuntimeError("VAE has neither _decode nor decode; cannot compile")
+    vae._decode_dynamic = torch.compile(core, mode=_COMPILE_MODE, dynamic=True)
+    _configured_decode_dynamic.add(id(vae))
+    print("[vae_compile] compiled vae._decode_dynamic (dynamic=True, variable chunk-size path)")
+
+
+def decode_via_dynamic(vae, z: torch.Tensor, return_dict: bool = True):
+    fn = getattr(vae, "_decode_dynamic", None)
+    if fn is None:
+        return vae.decode(z, return_dict=return_dict)
+    decoded = fn(prep_input(z))
+    if not return_dict:
+        return (decoded,)
+    from xvideo.models.vae.vae import DecoderOutput
+    return DecoderOutput(sample=decoded)
+
+
+def warmup_decode_dynamic(vae, latent_channels: int, hw_list, device: torch.device,
+                          dtype: torch.dtype, temporal_lens: tuple[int, ...] = (1, 2),
+                          autocast: bool = True) -> None:
+    fn = getattr(vae, "_decode_dynamic", None)
+    if fn is None:
+        print("[vae_compile] warmup_decode_dynamic skipped: _decode_dynamic not set up")
+        return
+    from contextlib import nullcontext
+    dev_type = torch.device(device).type
+    use_ac = autocast and dev_type in {"cuda", "cpu"}
+    n_ok = 0
+    for (h_lat, w_lat) in hw_list:
+        for t in temporal_lens:
+            z = torch.zeros(1, latent_channels, t, h_lat, w_lat, device=device, dtype=dtype)
+            z = prep_input(z)
+            ctx = (
+                torch.autocast(device_type=dev_type, dtype=dtype, enabled=True)
+                if use_ac else nullcontext()
+            )
+            try:
+                with torch.no_grad(), ctx:
+                    _ = fn(z)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize(device)
+                n_ok += 1
+            except Exception as exc:  # noqa: BLE001
+                print(f"[vae_compile] dynamic decode warmup failed for ({h_lat},{w_lat},t={t}): {exc!r}")
+    print(f"[vae_compile] dynamic decode warmup done: {n_ok}/{len(hw_list) * len(temporal_lens)} shapes autocast={autocast}")
 
 
 def encode_via_dynamic(vae, x: torch.Tensor):
