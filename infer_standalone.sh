@@ -7,6 +7,12 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Ensure joyomni_ops (editable install) and the xvideo package are both resolvable
+# regardless of which interpreter/cwd context ends up running this -- same pattern
+# deploy/run_server.sh uses for xvideo (PYTHONPATH="$HERE"), extended to also cover
+# joyomni_ops explicitly rather than relying solely on its site-packages .pth finder.
+export PYTHONPATH="$SCRIPT_DIR/deploy/joyomni_ops:$SCRIPT_DIR/deploy:${PYTHONPATH:-}"
+
 # Argument validation
 if [ $# -lt 2 ]; then
     echo "Usage: bash infer_standalone.sh <prompt> <input_video> [output_path] [--image style.jpg]"

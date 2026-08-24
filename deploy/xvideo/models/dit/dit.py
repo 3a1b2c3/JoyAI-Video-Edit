@@ -40,12 +40,19 @@ NUM_MODULATION_CHUNKS = 6
 SELF_ATTN_MODE_REF_IMAGE_CACHE = "ref_image_cache"
 
 
-def _env_on(name: str) -> bool:
-    return os.environ.get(name, "").lower() in {"1", "true", "yes", "on"}
+def _env_on(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
 
 
-_FP8_IMG_ENABLED = _env_on("JOYOMNI_FP8_IMG")
-_FP8_TXT_ENABLED = _env_on("JOYOMNI_FP8_TXT")
+# Default on regardless of launcher (deploy/run_server.sh already exports these as
+# default-1, but run_server_best.sh and infer_standalone.py don't set them at all,
+# silently leaving FP8 quantization off and risking OOM on low-VRAM loads). Still
+# overridable with JOYOMNI_FP8_IMG=0 / JOYOMNI_FP8_TXT=0.
+_FP8_IMG_ENABLED = _env_on("JOYOMNI_FP8_IMG", default=True)
+_FP8_TXT_ENABLED = _env_on("JOYOMNI_FP8_TXT", default=True)
 
 
 def _fp8_stream_wanted(stream: str) -> bool:
