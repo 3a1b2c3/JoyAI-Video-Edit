@@ -63,11 +63,11 @@ def main():
     # Load runtime (same as server uses)
     print("[1/4] Loading models...")
 
-    # Set checkpoint paths
-    repo_root = Path(__file__).parent.parent
-    dit_ckpt = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
-    vae_ckpt = str(repo_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
-    text_encoder_ckpt = str(repo_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
+    # Set checkpoint paths (deploy is parent dir)
+    deploy_root = Path(__file__).parent
+    dit_ckpt = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
+    vae_ckpt = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
+    text_encoder_ckpt = str(deploy_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
 
     runtime = JoyOmniRuntime.load(
         dit_ckpt=dit_ckpt,
