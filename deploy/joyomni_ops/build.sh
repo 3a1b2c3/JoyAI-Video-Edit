@@ -203,6 +203,24 @@ else
         which nvcc || echo "MISSING: nvcc not on PATH"
         nvcc --version 2>/dev/null | tail -n 4
         echo "torch.version.cuda: $("$PYTHON" -c 'import torch; print(torch.version.cuda)' 2>/dev/null || echo '<torch import failed>')"
+        echo ""
+        # Specifically for "ImportError: dynamic module does not define module export
+        # function (PyInit__C)": the .so built/linked/copied fine, but the symbol
+        # Python's import machinery looks for isn't in it. Narrows down whether the
+        # module-name macro is wrong, the symbol got stripped/hidden, or a stale .so
+        # elsewhere on disk is shadowing the fresh build.
+        echo "-- PyInit__C diagnostics (for 'dynamic module does not define module export function') --"
+        echo "pybind module macro:"
+        grep -n "PYBIND11_MODULE\|TORCH_EXTENSION_NAME" csrc/pybind.cpp 2>&1 | sed 's/^/  /'
+        SO_PATH="$HERE/joyomni_ops/_C$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))' 2>/dev/null)"
+        echo "expected .so: $SO_PATH"
+        ls -la "$SO_PATH" 2>&1 | sed 's/^/  /'
+        echo "symbols (nm -D):"
+        nm -D "$SO_PATH" 2>&1 | grep -i "PyInit\|undefined" | sed 's/^/  /'
+        echo "symbols (objdump -T, catches what nm -D sometimes misses):"
+        objdump -T "$SO_PATH" 2>&1 | grep -i PyInit | sed 's/^/  /'
+        echo "other _C*.so files on disk (possible stale/shadowing copy):"
+        find / -xdev -name "_C*.so" -path "*joyomni_ops*" 2>/dev/null | sed 's/^/  /'
     } 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
     echo ""
     echo "Workaround (build without FP8, only if the above doesn't point to a fixable cause):"
