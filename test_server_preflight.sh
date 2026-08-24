@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # Pre-flight checks before running server
 # Run this before bash run_server_best.sh to catch issues early
 
@@ -20,10 +20,10 @@ echo "[1/6] CUDA..."
 if command -v nvidia-smi &>/dev/null; then
     GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0 2>/dev/null | head -1)
     GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1)
-    echo "  âœ“ GPU: $GPU_NAME (${GPU_MEM} MB)"
+    echo "  ✓ GPU: $GPU_NAME (${GPU_MEM} MB)"
     PASSED=$((PASSED+1))
 else
-    echo "  âœ— CUDA/nvidia-smi not found"
+    echo "  ✗ CUDA/nvidia-smi not found"
     FAILED=$((FAILED+1))
 fi
 echo ""
@@ -39,9 +39,9 @@ MODELS=(
 for model in "${MODELS[@]}"; do
     if [ -f "$model" ]; then
         SIZE=$(du -h "$model" | cut -f1)
-        echo "  âœ“ $(basename "$model") ($SIZE)"
+        echo "  ✓ $(basename "$model") ($SIZE)"
     else
-        echo "  âœ— Missing: $model"
+        echo "  ✗ Missing: $model"
         FAILED=$((FAILED+1))
     fi
 done
@@ -64,10 +64,10 @@ from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rm
 from joyomni_ops._C import fp8_scaled_mm, sgl_per_token_quant_fp8
 print(joyomni_ops.__file__)
 " 2>&1); then
-    echo "  âœ“ Installed with FP8 support ($JOYOMNI_CHECK)"
+    echo "  ✓ Installed with FP8 support ($JOYOMNI_CHECK)"
     PASSED=$((PASSED+1))
 else
-    echo "  âœ— joyomni_ops broken under $(python -c 'import sys; print(sys.executable)'):"
+    echo "  ✗ joyomni_ops broken under $(python -c 'import sys; print(sys.executable)'):"
     echo "$JOYOMNI_CHECK" | sed 's/^/    /'
     echo "  Run: cd deploy/joyomni_ops && PYTHON=$(python -c 'import sys; print(sys.executable)') bash build.sh"
     FAILED=$((FAILED+1))
@@ -76,20 +76,20 @@ echo ""
 
 # Test 4: PyTorch CUDA
 echo "[4/6] PyTorch CUDA..."
-if python -c "import torch; print(f'  âœ“ PyTorch {torch.__version__}'); print(f'  âœ“ CUDA available: {torch.cuda.is_available()}'); print(f'  âœ“ Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"CPU\"}')" 2>/dev/null; then
+if python -c "import torch; print(f'  ✓ PyTorch {torch.__version__}'); print(f'  ✓ CUDA available: {torch.cuda.is_available()}'); print(f'  ✓ Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"CPU\"}')" 2>/dev/null; then
     PASSED=$((PASSED+1))
 else
-    echo "  âœ— PyTorch not properly installed"
+    echo "  ✗ PyTorch not properly installed"
     FAILED=$((FAILED+1))
 fi
 echo ""
 
 # Test 5: Diffusers & transformers
 echo "[5/6] Dependencies (diffusers, transformers)..."
-if python -c "from diffusers import AutoencoderKL; from transformers import Qwen2_5_VLForConditionalGeneration; print('  âœ“ All imports OK')" 2>/dev/null; then
+if python -c "from diffusers import AutoencoderKL; from transformers import Qwen2_5_VLForConditionalGeneration; print('  ✓ All imports OK')" 2>/dev/null; then
     PASSED=$((PASSED+1))
 else
-    echo "  âœ— Missing dependency"
+    echo "  ✗ Missing dependency"
     FAILED=$((FAILED+1))
 fi
 echo ""
@@ -106,11 +106,11 @@ cfg = ExpConfig()
 cfg.dit_precision = 'bf16'
 print('  Testing model load...')
 # Just load the config, don't actually load models (too slow for pre-flight)
-print('  âœ“ Config valid')
+print('  ✓ Config valid')
 " 2>/dev/null; then
     PASSED=$((PASSED+1))
 else
-    echo "  âš  Model load failed (might be OK if checkpoint loading is slow)"
+    echo "  ⚠ Model load failed (might be OK if checkpoint loading is slow)"
 fi
 echo ""
 
@@ -121,10 +121,10 @@ echo "=========================================="
 echo ""
 
 if [ $FAILED -gt 0 ]; then
-    echo "âŒ Pre-flight check failed. Fix issues above before running server."
+    echo "❌ Pre-flight check failed. Fix issues above before running server."
     exit 1
 else
-    echo "âœ… All checks passed! Safe to run:"
+    echo "✅ All checks passed! Safe to run:"
     echo "   bash run_server_best.sh"
     exit 0
 fi

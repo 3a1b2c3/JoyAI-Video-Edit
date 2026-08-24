@@ -130,6 +130,20 @@ echo "[4/4] Building joyomni_ops (fp8 enabled)..."
 export JOYOMNI_OPS_CUTLASS_DIR="$HERE/cutlass"
 unset JOYOMNI_OPS_NO_FP8 2>/dev/null || true
 
+# setup.py reads JOYOMNI_OPS_NO_FP8 straight from the environment (see setup.py) --
+# if it's still truthy here (e.g. left over from an earlier `export
+# JOYOMNI_OPS_NO_FP8=1` workaround in this same shell session), fp8_gemm.cu silently
+# gets excluded from the build and joyomni_ops._C ends up missing fp8_scaled_mm /
+# sgl_per_token_quant_fp8 with no build error -- the exact bug that cost real time to
+# diagnose. Fail loudly instead of building a silently-crippled extension.
+log "JOYOMNI_OPS_NO_FP8 (post-unset, must be empty): '${JOYOMNI_OPS_NO_FP8:-}'"
+log "JOYOMNI_OPS_CUTLASS_DIR: $JOYOMNI_OPS_CUTLASS_DIR"
+if [ -n "${JOYOMNI_OPS_NO_FP8:-}" ]; then
+    echo "ERROR: JOYOMNI_OPS_NO_FP8 is still set to '${JOYOMNI_OPS_NO_FP8}' after unset -- something"
+    echo "  (a shell rc file?) is re-exporting it. This build would silently skip FP8."
+    exit 1
+fi
+
 # Cutlass FP8 template compiles can legitimately run 10+ min per file, so there's no
 # safe timeout to kill on -- instead log compiler-process state + object-file growth
 # every 30s in the background, so a real hang (vs. just-slow) is diagnosable from the
