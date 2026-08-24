@@ -1,0 +1,98 @@
+#!/bin/bash
+# Standalone inference (no server) with best GPU settings
+# Usage: bash infer_standalone.sh <prompt> <input_video> [output_path]
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Argument validation
+if [ $# -lt 2 ]; then
+    echo "Usage: bash infer_standalone.sh <prompt> <input_video> [output_path]"
+    echo ""
+    echo "  prompt          : text prompt for style/content"
+    echo "  input_video     : path to input MP4/WebM"
+    echo "  output_path     : where to save gen.mp4 (default: ./output_$(date +%s).mp4)"
+    exit 1
+fi
+
+PROMPT="$1"
+INPUT_VIDEO="$2"
+OUTPUT_PATH="${3:-./output_$(date +%s).mp4}"
+
+if [ ! -f "$INPUT_VIDEO" ]; then
+    echo "ERROR: input video not found: $INPUT_VIDEO"
+    exit 1
+fi
+
+# GPU detection (same as run_server_best.sh)
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1)
+GPU_MEM_MIB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0 2>/dev/null | head -1)
+GPU_MEM_GIB=$(( (GPU_MEM_MIB + 512) / 1024 ))
+
+if [ -z "$GPU_NAME" ]; then
+  echo "ERROR: nvidia-smi did not report a GPU -- is a driver installed?" >&2
+  exit 1
+fi
+
+echo "=========================================="
+echo "JoyAI Standalone Inference"
+echo "=========================================="
+echo "GPU: $GPU_NAME (${GPU_MEM_GIB} GiB)"
+echo "Prompt: $PROMPT"
+echo "Input: $INPUT_VIDEO"
+echo "Output: $OUTPUT_PATH"
+echo "=========================================="
+echo ""
+
+# Set environment per GPU (same as run_server_best.sh)
+case "$GPU_NAME" in
+  *B200*)
+    echo "Profile: NVIDIA B200 -- 720p @ 30 FPS"
+    export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_b200}"
+    export JOYOMNI_WIDTH="${JOYOMNI_WIDTH:-1248}" JOYOMNI_HEIGHT="${JOYOMNI_HEIGHT:-720}" JOYOMNI_FPS="${JOYOMNI_FPS:-30}"
+    ;;
+  *"RTX PRO 6000"*)
+    echo "Profile: RTX PRO 6000 -- 480p @ 24 FPS"
+    export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_pro6000}"
+    ;;
+  *5090*)
+    echo "Profile: RTX 5090 -- 480p @ 24 FPS, low-VRAM"
+    export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_rtx5090}"
+    export JOYOMNI_SAGE_ATTN="${JOYOMNI_SAGE_ATTN:-1}" JOYOMNI_FP8_FAST_ACCUM="${JOYOMNI_FP8_FAST_ACCUM:-1}" JOYOMNI_LOW_VRAM="${JOYOMNI_LOW_VRAM:-1}"
+    ;;
+  *A40*)
+    echo "Profile: A40 -- 480p @ 24 FPS, low-VRAM"
+    export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_a40}"
+    export JOYOMNI_LOW_VRAM="${JOYOMNI_LOW_VRAM:-1}"
+    ;;
+  *)
+    if [ "$GPU_MEM_GIB" -le 48 ]; then
+      echo "Profile: unrecognized card (${GPU_MEM_GIB} GiB) -- using low-VRAM"
+      export JOYOMNI_LOW_VRAM="${JOYOMNI_LOW_VRAM:-1}"
+    else
+      echo "Profile: unrecognized card (${GPU_MEM_GIB} GiB) -- using defaults"
+    fi
+    export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_default}"
+    ;;
+esac
+
+mkdir -p "$JOYOMNI_CACHE_ROOT"
+
+echo ""
+echo "Running inference..."
+python deploy/infer_standalone.py \
+    --prompt "$PROMPT" \
+    --input_video "$INPUT_VIDEO" \
+    --output "$OUTPUT_PATH"
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "✅ Complete!"
+    echo "   Output: $OUTPUT_PATH"
+else
+    echo ""
+    echo "❌ Inference failed"
+    exit 1
+fi

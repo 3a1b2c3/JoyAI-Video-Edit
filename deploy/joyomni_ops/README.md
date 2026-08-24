@@ -22,6 +22,13 @@ The first three and the quant are dependency-free hand-written CUDA. Only
 
 ## Build
 
+**Easy:** use the automated build script:
+```bash
+cd deploy/joyomni_ops
+bash build.sh
+```
+
+**Manual:** (for advanced use or troubleshooting)
 ```bash
 # Full build (needs a cutlass checkout; CUDA >= 12.8 for Blackwell SASS):
 JOYOMNI_OPS_CUTLASS_DIR=/path/to/cutlass pip install .
@@ -41,6 +48,41 @@ Chosen automatically from the local nvcc:
 Override with `JOYOMNI_OPS_CUDA_ARCHS="90;100a;120a"`.
 
 cutlass commit matching the reference build: `dcf215af`.
+
+### Troubleshooting
+
+**Problem:** `ImportError: cannot import name 'fp8_scaled_mm'`
+- **Cause:** Module was built with `JOYOMNI_OPS_NO_FP8=1` or build failed
+- **Fix:** Re-run `bash build.sh` and check for errors in `build.log`
+
+**Problem:** Build fails with "nvcc not found"
+- **Cause:** CUDA not in PATH or not installed
+- **Fix:** Ensure CUDA is installed and add to PATH:
+  ```bash
+  export PATH=/usr/local/cuda-12.8/bin:$PATH
+  export LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH
+  ```
+  Then re-run `bash build.sh`
+
+**Problem:** Build fails with "cutlass not found"
+- **Cause:** FP8 build requires cutlass; `build.sh` should clone it automatically
+- **Fix:** Manually clone:
+  ```bash
+  git clone --depth 1 https://github.com/NVIDIA/cutlass.git
+  bash build.sh
+  ```
+  Or build without FP8:
+  ```bash
+  JOYOMNI_OPS_NO_FP8=1 python -m pip install -e . --force-reinstall
+  ```
+
+**Problem:** FP8 not needed, want to skip the build complexity
+- **Fix:** Build without FP8 (server disables fp8 gates gracefully):
+  ```bash
+  JOYOMNI_OPS_NO_FP8=1 python -m pip install -e . --force-reinstall
+  unset JOYOMNI_FP8_FAST_ACCUM JOYOMNI_FP8_IMG JOYOMNI_FP8_TXT
+  bash run_server_best.sh
+  ```
 
 ## Usage
 

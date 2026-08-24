@@ -39,9 +39,14 @@ echo "=== [4/4] YOLOv8n person detector (optional -- person-presence gate) ==="
 if [ -f "$CKPT_ROOT/yolov8n.onnx" ]; then
   echo "✓ yolov8n.onnx already exists"
 else
+  echo "Downloading YOLOv8n v8.1.0 (OpenCV-compatible)..."
   curl -L -o "$CKPT_ROOT/yolov8n.onnx" \
-    https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx
-  echo "✓ Downloaded yolov8n.onnx"
+    https://github.com/ultralytics/assets/releases/download/v8.1.0/yolov8n.onnx
+  if [ -f "$CKPT_ROOT/yolov8n.onnx" ]; then
+    echo "✓ Downloaded yolov8n.onnx"
+  else
+    echo "⚠️  yolov8n.onnx download failed (optional, server will disable person-presence gate)"
+  fi
 fi
 
 echo
