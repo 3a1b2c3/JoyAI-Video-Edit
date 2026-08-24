@@ -35,11 +35,19 @@ curl -L -o "$CKPT_ROOT/face_detection_yunet_2023mar.onnx" \
   https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 
 echo
+echo "=== [4/4] YOLOv8n person detector (optional -- person-presence gate) ==="
+if [ -f "$CKPT_ROOT/yolov8n.onnx" ]; then
+  echo "✓ yolov8n.onnx already exists"
+else
+  curl -L -o "$CKPT_ROOT/yolov8n.onnx" \
+    https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx
+  echo "✓ Downloaded yolov8n.onnx"
+fi
+
+echo
 echo "=== Done ==="
 echo "  $CKPT_ROOT/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth"
 echo "  $CKPT_ROOT/JoyAI-Video-Edit/vae/{config.json, diffusion_pytorch_model.safetensors}"
 echo "  $CKPT_ROOT/MiMo-VL-7B-RL-2508/"
 echo "  $CKPT_ROOT/face_detection_yunet_2023mar.onnx"
-echo
-echo "NOT downloaded (optional, needs a throwaway conda env -- see DEPLOYMENT.md 3c):"
-echo "  $CKPT_ROOT/yolov8n.onnx  (person-presence gate; missing -> gate disabled, edits still run)"
+echo "  $CKPT_ROOT/yolov8n.onnx"
