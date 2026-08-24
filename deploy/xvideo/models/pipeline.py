@@ -294,10 +294,14 @@ class Pipeline(DiffusionPipeline):
         original_device = inputs.device
         inputs = inputs.to(self.vae.device)
 
+        # Use the dynamic-shape compiled encode path (see vae_compile.py's
+        # "reference-image path" _encode_dynamic), not the static dynamic=False
+        # vae.encode -- this method is only called from _encode_reference_chunk with
+        # variable-length windows, which is exactly what blows past torch._dynamo's
+        # recompile cache_size_limit on the static path and produces incorrect graph
+        # reuse (AssertionError: temporal dim expected 1, got N).
         from xvideo.models.vae import vae_compile as _vc
-        inputs = _vc.prep_input(inputs)
-
-        latents = self.vae.encode(inputs).latent_dist.sample()
+        latents = _vc.encode_via_dynamic(self.vae, inputs).latent_dist.sample()
         if enable_denormalization:
             latents = self.normalize_latents(latents)
         return latents.to(original_device)
