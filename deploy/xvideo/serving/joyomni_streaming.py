@@ -315,6 +315,7 @@ class JoyOmniRuntime:
             _ddev = _module_device(decode_vae)
             _ddt = PRECISION_TO_TYPE[cfg.vae_precision]
             if _lat_c > 0 and _fspa > 0:
+                _decode_hw = []
                 for (_wh, _ww) in _orientations:
                     _ch = _wh * _stem_mod.group // _stem_mod.stride
                     _cw = _ww * _stem_mod.group // _stem_mod.stride
@@ -323,6 +324,17 @@ class JoyOmniRuntime:
                         _ch // _fspa, _cw // _fspa,
                         device=_ddev, dtype=_ddt,
                     )
+                    _decode_hw.append((_ch // _fspa, _cw // _fspa))
+                # dynamic=True path for ragged/varying chunk sizes (see
+                # maybe_setup_decode_dynamic's docstring) -- same fix as VAE encode's
+                # existing _encode_dynamic warmup below.
+                _vc.maybe_setup_decode_dynamic(decode_vae)
+                _vc.warmup_decode_dynamic(
+                    decode_vae, _lat_c, _decode_hw,
+                    device=_ddev, dtype=_ddt,
+                    temporal_lens=(1, 2, 1 + int(getattr(decode_vae, "chunk_size", 8) or 8)),
+                    autocast=(_ddt != torch.float32),
+                )
         except Exception as _vc_exc:
             print(f"#####[STREAM] VAE compile warmup skipped: {_vc_exc!r}")
 
