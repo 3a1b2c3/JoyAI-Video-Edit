@@ -206,9 +206,19 @@ print(f'  ✓ joyomni_ops loaded from {joyomni_ops.__file__}')
 fi
 echo ""
 
-# Verify FP8 functions are available
+# Verify FP8 functions are available. NOTE: pybind.cpp uses TORCH_LIBRARY (dispatcher
+# registration via torch.ops.load_library at dlopen time), not PYBIND11_MODULE -- there
+# is no joyomni_ops._C Python submodule to import from, and _C.so legitimately has no
+# PyInit__C symbol by design. The real functions are the top-level wrappers __init__.py
+# defines around torch.ops.joyomni_ops.*; has_fp8() is what actually confirms the FP8
+# op got registered (the wrapper functions exist unconditionally either way).
 echo "Verifying FP8 functions..."
-if "$PYTHON" -c "from joyomni_ops._C import fp8_scaled_mm, sgl_per_token_quant_fp8; print('  ✓ fp8_scaled_mm available'); print('  ✓ sgl_per_token_quant_fp8 available')" 2>&1; then
+if "$PYTHON" -c "
+from joyomni_ops import fp8_scaled_mm, sgl_per_token_quant_fp8, has_fp8
+assert has_fp8(), 'fp8_scaled_mm exists as a Python wrapper but is not registered with torch.ops -- FP8 kernels were not compiled in'
+print('  ✓ fp8_scaled_mm available')
+print('  ✓ sgl_per_token_quant_fp8 available')
+" 2>&1; then
     echo ""
     echo "✅ FP8 support verified!"
     exit 0

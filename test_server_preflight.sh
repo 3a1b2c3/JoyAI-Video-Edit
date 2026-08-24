@@ -56,12 +56,16 @@ echo ""
 # even when a stray joyomni_ops/ source dir shadows the real install or the compiled
 # _C extension is broken/missing -- both have bitten this repo before, so check for
 # real -- exact interpreter used to run infer_standalone.py/the server.
+# NOTE: pybind.cpp registers ops via TORCH_LIBRARY (loaded with torch.ops.load_library),
+# not PYBIND11_MODULE -- there is no joyomni_ops._C Python submodule to import from.
+# has_fp8() is what actually confirms the FP8 op got registered with the dispatcher
+# (the top-level wrapper functions __init__.py defines exist either way).
 echo "[3/6] joyomni_ops module..."
 if JOYOMNI_CHECK=$(python -c "
 import joyomni_ops
 assert getattr(joyomni_ops, '__file__', None), 'resolved as a namespace package (no __file__) -- not a real install'
-from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
-from joyomni_ops._C import fp8_scaled_mm, sgl_per_token_quant_fp8
+from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm, fp8_scaled_mm, sgl_per_token_quant_fp8, has_fp8
+assert has_fp8(), 'fp8_scaled_mm exists as a Python wrapper but is not registered with torch.ops -- FP8 kernels were not compiled in'
 print(joyomni_ops.__file__)
 " 2>&1); then
     echo "  ✓ Installed with FP8 support ($JOYOMNI_CHECK)"
