@@ -47,12 +47,32 @@ def _env_on(name: str, default: bool = False) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
-# Default on regardless of launcher (deploy/run_server.sh already exports these as
+def _gpu_supports_fp8() -> bool:
+    """FP8 tensor cores don't exist in silicon before Ada Lovelace/Hopper (compute
+    capability 8.9+) -- Ampere (e.g. A40/3090, 8.6) and older physically cannot run
+    joyomni_ops' fp8_scaled_mm, regardless of build/env config. Calling it anyway
+    raises NotImplementedError at inference time instead of failing to enable."""
+    if not torch.cuda.is_available():
+        return False
+    major, minor = torch.cuda.get_device_capability()
+    return (major, minor) >= (8, 9)
+
+
+_FP8_HW_OK = _gpu_supports_fp8()
+if not _FP8_HW_OK and (_env_on("JOYOMNI_FP8_IMG") or _env_on("JOYOMNI_FP8_TXT")):
+    logging.getLogger(__name__).warning(
+        "JOYOMNI_FP8_IMG/TXT requested but this GPU (compute capability %s) has no FP8 "
+        "tensor cores (needs 8.9+, e.g. Ada/Hopper/Blackwell) -- ignoring, staying bf16.",
+        torch.cuda.get_device_capability() if torch.cuda.is_available() else "unknown",
+    )
+
+# Default on when the launcher doesn't set these (deploy/run_server.sh already exports
 # default-1, but run_server_best.sh and infer_standalone.py don't set them at all,
-# silently leaving FP8 quantization off and risking OOM on low-VRAM loads). Still
-# overridable with JOYOMNI_FP8_IMG=0 / JOYOMNI_FP8_TXT=0.
-_FP8_IMG_ENABLED = _env_on("JOYOMNI_FP8_IMG", default=True)
-_FP8_TXT_ENABLED = _env_on("JOYOMNI_FP8_TXT", default=True)
+# silently leaving FP8 quantization off and risking OOM on low-VRAM loads) -- but only
+# on hardware that can actually execute FP8 GEMM. Still overridable downward with
+# JOYOMNI_FP8_IMG=0 / JOYOMNI_FP8_TXT=0; cannot be forced on where hardware can't do it.
+_FP8_IMG_ENABLED = _FP8_HW_OK and _env_on("JOYOMNI_FP8_IMG", default=True)
+_FP8_TXT_ENABLED = _FP8_HW_OK and _env_on("JOYOMNI_FP8_TXT", default=True)
 
 
 def _fp8_stream_wanted(stream: str) -> bool:
