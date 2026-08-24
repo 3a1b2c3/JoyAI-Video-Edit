@@ -12,9 +12,6 @@ from PIL import Image
 # Add deploy to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from xvideo.serving.joyomni_streaming import JoyOmniRuntime
-from xvideo.config import ExpConfig
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="JoyAI standalone inference")
@@ -60,22 +57,20 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
 
-    # Load runtime (same as server uses)
+    # Load models directly (simpler than JoyOmniRuntime)
     print("[1/4] Loading models...")
+    from xvideo.models.models import load_dit, load_pipeline, build_vae
+    from xvideo.config import ExpConfig
 
-    # Set checkpoint paths (deploy is parent dir)
     deploy_root = Path(__file__).parent
-    dit_ckpt = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
-    vae_ckpt = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
-    text_encoder_ckpt = str(deploy_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
+    cfg = ExpConfig()
+    cfg.training_mode = False
+    cfg.dit_ckpt = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
+    cfg.vae_arch_config['pretrained'] = str(deploy_root / "deps/checkpoints/JoyAI-Video-Edit/vae")
+    cfg.text_encoder_arch_config['params']['text_encoder_ckpt'] = str(deploy_root / "deps/checkpoints/MiMo-VL-7B-RL-2508")
 
-    runtime = JoyOmniRuntime.load(
-        dit_ckpt=dit_ckpt,
-        vae_ckpt=vae_ckpt,
-        text_encoder_ckpt=text_encoder_ckpt,
-        device=device,
-        seed=args.seed,
-    )
+    dit = load_dit(cfg, device=device)
+    pipeline = load_pipeline(cfg, dit, device=device)
     print(f"✓ Models loaded on {device}")
     print()
 
@@ -102,22 +97,25 @@ def main():
     # Generate
     print(f"[{step_num}/4] Generating...")
     with torch.no_grad():
-        output = runtime.infer(
+        output = pipeline(
             prompt=args.prompt,
-            image=style_img,
+            num_inference_steps=args.num_steps,
+            guidance_scale=args.guidance_scale,
             num_frames=args.num_frames,
             height=args.height,
             width=args.width,
-            num_steps=args.num_steps,
-            guidance_scale=args.guidance_scale,
-            seed=args.seed,
         )
     print(f"✓ Generated")
     print()
 
     # Save
     print("[4/4] Saving output...")
-    output.save(args.output)
+    if hasattr(output, 'images'):
+        frames = output.images
+    else:
+        frames = output
+    import imageio.v3 as iio
+    iio.imwrite(args.output, frames, fps=24)
 
     print()
     print("=" * 70)
