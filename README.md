@@ -31,6 +31,25 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 - **Autoregressive diffusion design.** Combines an MLLM condition encoder, causal video VAE, and MMDiT backbone for streaming video editing.
 - **High-throughput 720p deployment.** Reaches 30 FPS end-to-end throughput at 720 × 1248 with bounded KV-state inference and stable per-chunk compute.
 
+## 🕹️ Live Demo
+
+Point your webcam at yourself, type an instruction, and watch the edit stream back in real time — try it in the browser: **[Hugging Face Demo](https://huggingface.co/spaces/wxDai/joyai-video-edit)**. The screenshots below are captured live from it (left: camera source, right: streamed result).
+
+<p align="center">
+  <img src="assets/live_demo/live_cartoon_group.jpg" width="96%" alt="Live demo — turn all people into cartoon style">
+</p>
+
+<table>
+  <tr>
+    <td><img src="assets/live_demo/live_optimus_prime.jpg" alt="Live demo — transform into Optimus Prime with background unchanged"></td>
+    <td><img src="assets/live_demo/live_gundam.jpg" alt="Live demo — transform into a Gundam via reference-guided editing"></td>
+  </tr>
+  <tr>
+    <td><img src="assets/live_demo/live_hanfu_palace.jpg" alt="Live demo — Ming-style gown outfit change with ancient palace background"></td>
+    <td><img src="assets/live_demo/live_cel_anime.jpg" alt="Live demo — add cap and sunglasses, convert to hand-drawn cel animation"></td>
+  </tr>
+</table>
+
 ## 🚧 TODO
 
 - [x] **Stronger model version in progress.** A more powerful version is under active development, with a particular focus on advancing reference-image-guided video editing (RV2V) capabilities.
