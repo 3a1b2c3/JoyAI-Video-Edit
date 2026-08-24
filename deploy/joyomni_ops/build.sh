@@ -17,7 +17,6 @@ cd "$HERE"
 LOG_FILE="$HERE/build.log"
 : > "$LOG_FILE"  # fresh log each run; pre-build diagnostics + pip install output both land here
 log() { echo "$@" | tee -a "$LOG_FILE"; }
-log_cmd() { echo "  \$ $*" >>"$LOG_FILE"; "$@" 2>&1 | tee -a "$LOG_FILE"; }
 
 # Build against whichever interpreter will actually run inference. A .so built
 # for one CPython version/ABI is silently unimportable under another: pip
@@ -40,7 +39,7 @@ echo "Python version:    $("$PYTHON" --version 2>&1)"
 echo "Target ABI tag:    $("$PYTHON" -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))')"
 echo ""
 
-log "--- pre-build diagnostics (full copy in $LOG_FILE) ---"
+echo "--- pre-build diagnostics (also written to $LOG_FILE) ---"
 {
     echo "pip:         $("$PYTHON" -m pip --version 2>&1)"
     echo "setuptools:  $("$PYTHON" -c 'import setuptools; print(setuptools.__version__)' 2>/dev/null || echo '<not installed>')"
@@ -74,8 +73,7 @@ for name in ('torch', 'torchvision', 'torchaudio', 'ninja', 'wheel', 'packaging'
     echo "-- git / submodules --"
     echo "HEAD: $(git rev-parse --short HEAD 2>/dev/null) ($(git branch --show-current 2>/dev/null))"
     git submodule status 2>/dev/null
-} >>"$LOG_FILE" 2>&1
-tail -n +1 "$LOG_FILE" | sed 's/^/  /'
+} 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
 echo ""
 
 # Check CUDA is available
