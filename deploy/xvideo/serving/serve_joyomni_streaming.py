@@ -1199,6 +1199,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 print(f"#####[REC] recording -> {base}", flush=True)
 
                 _write_prompt_sidecar()
+                if ref_image is not None:
+                    try:
+                        ref_image.save(base / "ref.png")
+                    except Exception:
+                        pass
             except Exception as exc:
                 ws_debug["rec_error"] = repr(exc)
                 print(f"#####[REC] start failed: {exc!r} -> recording OFF", flush=True)

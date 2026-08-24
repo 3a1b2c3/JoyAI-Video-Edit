@@ -370,7 +370,7 @@ const I18N = {
     q_downgrade_auto: " · 已自动降到低画质", q_downgrade_hint: " · 建议降低画质",
     flow_drop_tail: " · 带宽不足，正在丢帧保延迟",
     up_auto_tail: " · 上行已自动降至中档",
-    res_notice: "本演示运行在 {res}，并非模型原生的 1248×720 分辨率，画质与编辑效果会略有下降",
+    res_notice: "本演示运行在 {res}，而非模型原生的 1248×720 分辨率，画质与编辑效果会有所下降。",
   },
   en: {
     tagline: "Streaming video editing",
@@ -431,7 +431,7 @@ const I18N = {
     q_downgrade_auto: " · auto-lowered to low quality", q_downgrade_hint: " · consider lowering quality",
     flow_drop_tail: " · bandwidth limited, dropping frames",
     up_auto_tail: " · uplink auto-lowered to mid",
-    res_notice: "This demo runs at {res}, not the model's native 1248×720 resolution; visual quality and edit fidelity are slightly reduced",
+    res_notice: "This demo runs at {res}, not the model's native 1248×720 resolution; visual quality and edit fidelity are reduced.",
   },
 };
 let currentLang = localStorage.getItem("joyomni_lang") || "en";
@@ -613,6 +613,7 @@ if (window.ResizeObserver && camera) {
 let ws = null;
 let stream = null;
 let videoFileUrl = null;
+let terminalHold = false;
 let usingVideoFile = false;
 let timer = null;
 let tickInFlight = false;
@@ -1647,27 +1648,9 @@ async function beginSession() {
   return true;
 }
 
-// ZeroGPU identity handshake (same protocol as gradio's frontend): when embedded on
-// huggingface.co, the parent page can mint user-scoped quota headers for this space.
-// No readiness gate — asking before the parent's ack just resolves via the timeout,
-// whereas gating on the ack made a fast first click fall back to anonymous quota.
-if (window.parent !== window) {
-  try { window.parent.postMessage("supports-zerogpu-headers", "https://huggingface.co"); } catch (e) {}
-}
-
-function zgpuHeaders(timeoutMs = 2500) {
-  if (window.parent === window) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const ch = new MessageChannel();
-    const timer = setTimeout(() => { ch.port1.close(); resolve(null); }, timeoutMs);
-    ch.port1.onmessage = ({ data }) => { clearTimeout(timer); ch.port1.close(); resolve(data); };
-    try { window.parent.postMessage("zerogpu-headers", "https://huggingface.co", [ch.port2]); }
-    catch (e) { clearTimeout(timer); resolve(null); }
-  });
-}
-
 async function start() {
   startingRun = true;
+  terminalHold = false;
   setSendBusy(true, t("busy_starting"));
   showOutputStart(true, t("busy_starting"));
   try {
@@ -1678,25 +1661,7 @@ async function start() {
     return;
   }
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  // Claim a user-scoped GPU identity before connecting: ask the huggingface.co parent
-  // page for quota headers (zerogpu-headers handshake), relay them over a plain GET
-  // (WS can't carry custom headers), then hand /ws the one-time claim ticket.
-  let wsQuery = "";
-  let zh = await zgpuHeaders();
-  if (zh instanceof Map) zh = Object.fromEntries(zh);
-  if (zh && typeof zh === "object" && Object.keys(zh).length) {
-    const mintSid = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-    try {
-      const info = await (await fetch(`/mint/${mintSid}`, { headers: zh })).json();
-      console.log("[quota] identity mint:", info);
-      if (info.stashed) wsQuery = `?mint=${mintSid}`;
-    } catch (err) {
-      console.log("[quota] identity mint failed:", err);
-    }
-  } else {
-    console.log("[quota] no parent handshake (direct access or logged-out) — anonymous quota");
-  }
-  const socket = new WebSocket(`${protocol}://${location.host}/ws${wsQuery}`);
+  const socket = new WebSocket(`${protocol}://${location.host}/ws`);
   ws = socket;
   socket.binaryType = "arraybuffer";
   socket.onopen = async () => {
@@ -1910,7 +1875,7 @@ async function start() {
         stopVideoPull();
         stopRecordDrain();
         sessionGranted = false;
-        setSendBusy(false, t("busy_released"));
+        if (!terminalHold) setSendBusy(false, t("busy_released"));
         return;
       }
       if (msg.type === "error") {
@@ -1919,8 +1884,10 @@ async function start() {
         sessionGranted = false;
         startingRun = false;
         console.error("[server error]", msg.message || msg);
-        setSendBusy(false, String(msg.message || "server error"));
-        showOutputIdle(true);
+        const hint = String(msg.message || "server error");
+        terminalHold = true;
+        setSendBusy(false, hint);
+        showOutputStart(true, hint);
         return;
       }
       return;
@@ -1966,8 +1933,10 @@ async function start() {
     ws = null;
     startingRun = false;
     sessionGranted = false;
-    setSendBusy(false, t("busy_disconnected"));
-    showOutputIdle(true);
+    if (!terminalHold) {
+      setSendBusy(false, t("busy_disconnected"));
+      showOutputIdle(true);
+    }
     updateMetrics();
   };
   socket.onerror = () => {
