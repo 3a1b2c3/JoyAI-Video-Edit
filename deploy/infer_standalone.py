@@ -30,6 +30,15 @@ def parse_args():
     parser.add_argument("--num_steps", type=int, default=30, help="Diffusion steps")
     parser.add_argument("--guidance_scale", type=float, default=7.5, help="CFG guidance scale")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--dit_checkpoint", type=str,
+                        default=os.environ.get("JOYOMNI_DIT_CHECKPOINT", "deploy/deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth"),
+                        help="DiT checkpoint path")
+    parser.add_argument("--vae_checkpoint", type=str,
+                        default=os.environ.get("JOYOMNI_VAE_CHECKPOINT", "deploy/deps/checkpoints/JoyAI-Video-Edit/vae"),
+                        help="VAE checkpoint path")
+    parser.add_argument("--text_encoder_checkpoint", type=str,
+                        default=os.environ.get("JOYOMNI_TEXT_ENCODER_CHECKPOINT", "deploy/deps/checkpoints/MiMo-VL-7B-RL-2508"),
+                        help="Text encoder checkpoint path")
     return parser.parse_args()
 
 

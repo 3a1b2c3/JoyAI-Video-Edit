@@ -26,6 +26,17 @@ if [ ! -f "$INPUT_VIDEO" ]; then
     exit 1
 fi
 
+# Set checkpoint paths (from deploy/deps/checkpoints)
+export JOYOMNI_DIT_CHECKPOINT="$SCRIPT_DIR/deploy/deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth"
+export JOYOMNI_VAE_CHECKPOINT="$SCRIPT_DIR/deploy/deps/checkpoints/JoyAI-Video-Edit/vae"
+export JOYOMNI_TEXT_ENCODER_CHECKPOINT="$SCRIPT_DIR/deploy/deps/checkpoints/MiMo-VL-7B-RL-2508"
+
+if [ ! -f "$JOYOMNI_DIT_CHECKPOINT" ]; then
+    echo "ERROR: DiT checkpoint not found: $JOYOMNI_DIT_CHECKPOINT"
+    echo "       Run: bash download_models.sh"
+    exit 1
+fi
+
 # GPU detection (same as run_server_best.sh)
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 2>/dev/null | head -1)
 GPU_MEM_MIB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0 2>/dev/null | head -1)
