@@ -144,16 +144,20 @@ if [ -n "${JOYOMNI_OPS_NO_FP8:-}" ]; then
     exit 1
 fi
 
-# Cutlass FP8 template compiles can legitimately run 10+ min per file, so there's no
-# safe timeout to kill on -- instead log compiler-process state + object-file growth
-# every 30s in the background, so a real hang (vs. just-slow) is diagnosable from the
-# log afterward without needing to interrupt an in-progress build to check.
+# Cutlass FP8 template compiles can legitimately run 10+ min per file with zero output
+# in between, so there's no safe timeout to kill on. Log compiler-process CPU%/elapsed
+# time (rising %CPU + growing ETIME on cicc/ptxas = genuinely working, not hung) plus a
+# coarse "N of M kernel .o files done" counter every 30s, so progress is visible live
+# via `tail -f build.log` without needing to interrupt an in-progress build to check.
+KERNEL_COUNT=$(ls csrc/*.cu 2>/dev/null | wc -l)
 (
     while true; do
         sleep 30
         {
             echo "--- watchdog $(date +%H:%M:%S) ---"
-            ps -eo pid,stat,etime,cmd 2>/dev/null | grep -E "cicc|ptxas|cc1plus|nvcc" | grep -v grep
+            ps -eo pid,pcpu,stat,etime,cmd 2>/dev/null | grep -E "cicc|ptxas|cc1plus|nvcc" | grep -v grep
+            DONE=$(ls /tmp/tmp*.build-temp/csrc/*.o 2>/dev/null | wc -l)
+            echo "kernel objects compiled: $DONE / $KERNEL_COUNT"
             ls -la /tmp/tmp*.build-temp/csrc/*.o 2>/dev/null
         } >> "$LOG_FILE"
     done
@@ -259,7 +263,11 @@ else
         echo "symbols (objdump -T, catches what nm -D sometimes misses):"
         objdump -T "$SO_PATH" 2>&1 | grep -i PyInit | sed 's/^/  /'
         echo "other _C*.so files on disk (possible stale/shadowing copy):"
-        find / -xdev -name "_C*.so" -path "*joyomni_ops*" 2>/dev/null | sed 's/^/  /'
+        # Scoped to $HERE + this interpreter's actual site-packages dirs, NOT a
+        # filesystem-wide `find /` -- that can hang for minutes on a shared box and
+        # has repeatedly stalled this diagnostic block out from under people.
+        SEARCH_DIRS="$HERE $("$PYTHON" -c "import site; print(' '.join(site.getsitepackages() + [site.getusersitepackages()]))" 2>/dev/null || true)"
+        find $SEARCH_DIRS -maxdepth 6 -name "_C*.so" -path "*joyomni_ops*" 2>/dev/null | sed 's/^/  /'
     } 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
     echo ""
     echo "Workaround (build without FP8, only if the above doesn't point to a fixable cause):"
