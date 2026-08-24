@@ -21,6 +21,20 @@ _COMPILE_MODE = (
     else "max-autotune-no-cudagraphs"
 )
 
+# _encode/_decode's Python for-loop mutates a plain list (feat_cache) across
+# iterations to carry causal-conv state between chunks. torch.compile (both
+# dynamic=False and dynamic=True) can graph-break mid-iteration right at that mutation
+# (observed: a synthetic torch_dynamo_resume_in_forward_at_<N> frame appears in the
+# traceback), which corrupts feat_cache/feat_idx state across iterations and produces
+# "Input temporal dimension is expected to be 1 when cache_x is None, got N" -- for
+# BOTH compile modes, on ragged/irregular chunk sizes. *_via_dynamic therefore runs
+# these eager by default (the manual chunking loop itself is correct; only the
+# compiled versions corrupt it). Set JOYOMNI_VAE_COMPILE_CACHE_LOOP=1 to re-enable the
+# compiled path once/if this graph-break interaction is fixed upstream in torch.
+_EAGER_CACHE_LOOP = os.environ.get("JOYOMNI_VAE_COMPILE_CACHE_LOOP", "").lower() not in {
+    "1", "true", "yes", "on",
+}
+
 _configured: set[int] = set()
 _configured_encode: set[int] = set()
 _configured_encode_dynamic: set[int] = set()
@@ -104,9 +118,14 @@ def maybe_setup_encode_dynamic(vae) -> None:
         core = getattr(vae, "encode")
     else:
         raise RuntimeError("VAE has neither _encode nor encode; cannot compile")
-    vae._encode_dynamic = torch.compile(core, mode=_COMPILE_MODE, dynamic=True)
+    if _EAGER_CACHE_LOOP:
+        vae._encode_dynamic = core
+        print("[vae_compile] vae._encode_dynamic = eager _encode (cache-loop graph-break "
+              "workaround; set JOYOMNI_VAE_COMPILE_CACHE_LOOP=1 to compile instead)")
+    else:
+        vae._encode_dynamic = torch.compile(core, mode=_COMPILE_MODE, dynamic=True)
+        print("[vae_compile] compiled vae._encode_dynamic (dynamic=True, reference-image path)")
     _configured_encode_dynamic.add(id(vae))
-    print("[vae_compile] compiled vae._encode_dynamic (dynamic=True, reference-image path)")
 
 
 _configured_decode_dynamic: set[int] = set()
@@ -125,9 +144,14 @@ def maybe_setup_decode_dynamic(vae) -> None:
         core = getattr(vae, "decode")
     else:
         raise RuntimeError("VAE has neither _decode nor decode; cannot compile")
-    vae._decode_dynamic = torch.compile(core, mode=_COMPILE_MODE, dynamic=True)
+    if _EAGER_CACHE_LOOP:
+        vae._decode_dynamic = core
+        print("[vae_compile] vae._decode_dynamic = eager _decode (cache-loop graph-break "
+              "workaround; set JOYOMNI_VAE_COMPILE_CACHE_LOOP=1 to compile instead)")
+    else:
+        vae._decode_dynamic = torch.compile(core, mode=_COMPILE_MODE, dynamic=True)
+        print("[vae_compile] compiled vae._decode_dynamic (dynamic=True, variable chunk-size path)")
     _configured_decode_dynamic.add(id(vae))
-    print("[vae_compile] compiled vae._decode_dynamic (dynamic=True, variable chunk-size path)")
 
 
 def decode_via_dynamic(vae, z: torch.Tensor, return_dict: bool = True):
