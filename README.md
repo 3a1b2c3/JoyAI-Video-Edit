@@ -19,6 +19,7 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 
 ## 🔥🔥🔥 News!!
 
+- 2026.08.24: 🎉 Consumer GPU support landed — real-time streaming video editing on a single GeForce RTX 5090 (32 GB): 840 × 480 @ 24 FPS. **[Deployment Guide](DEPLOYMENT.md)**
 - 2026.08.15: 🎉 Live demo released — real-time streaming video editing on a single RTX PRO 6000 (Blackwell) GPU: 840 × 480 @ 24 FPS or 720p @ 16 FPS. **[Try HuggingFace Demo](https://huggingface.co/spaces/wxDai/joyai-video-edit)**
 - 2026.08.14: 🎉 Released an upgraded checkpoint with significantly stronger reference-image-guided video editing (RV2V), delivering better subject and identity preservation, more faithful reference conditioning, and improved temporal consistency across long streams. Grab the new **[DiT weights](https://huggingface.co/jdopensource/JoyAI-Video-Edit/blob/main/dit/joyai_video_edit_dit_0811.pth)**.
 - 2026.08.05: 🎉 We release the deployment code, [technical report](https://arxiv.org/pdf/2608.03974), and JoyAI-Video-Edit checkpoints. Please check the links above for details.
@@ -33,7 +34,7 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 ## 🚧 TODO
 
 - [x] **Stronger model version in progress.** A more powerful version is under active development, with a particular focus on advancing reference-image-guided video editing (RV2V) capabilities.
-- [ ] **Consumer GPU support.** Optimize deployment for consumer-grade GPUs such as GeForce RTX 5090.
+- [x] **Consumer GPU support.** Optimize deployment for consumer-grade GPUs such as GeForce RTX 5090.
 - [ ] **Diffusers support.** Provide a 🤗 Diffusers pipeline for JoyAI-Video-Edit to streamline loading and inference.
 - [ ] **LongV2VBench release.** Release LongV2VBench for long-form video-to-video editing evaluation.
 - [ ] **Release full training and data pipelines.** Open-source the complete training framework and data generation pipeline.
