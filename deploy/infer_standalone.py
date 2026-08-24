@@ -97,7 +97,7 @@ def main():
     # Generate
     print(f"[{step_num}/4] Generating...")
     with torch.no_grad():
-        output = pipeline(
+        output = pipeline.__call__(
             prompt=args.prompt,
             num_inference_steps=args.num_steps,
             guidance_scale=args.guidance_scale,
