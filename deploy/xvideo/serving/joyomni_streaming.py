@@ -8,6 +8,14 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
+import joyomni_ops  # noqa: F401,E402 -- must import before torch (see infer.py); also
+# forces torch.ops.load_library() to happen here at module-import time, on the main
+# thread, before any worker thread exists. sgl_fused_ops._try_import() is lazy and its
+# first real call has been observed happening from inside a background worker thread
+# mid-CUDA-graph-capture -- a fragile place for a CUDA extension's first dlopen (fails
+# with a downstream, misleading "cannot import name X from joyomni_ops (unknown
+# location)"). Op registration via torch.ops is process-global once done, so doing it
+# eagerly here makes every later worker-thread use just reuse the already-loaded ops.
 import numpy as np
 import torch
 from diffusers.utils.torch_utils import randn_tensor
@@ -224,6 +232,16 @@ class JoyOmniRuntime:
         warmup_height: int = 720,
         warmup_width: int = 1248,
     ) -> "JoyOmniRuntime":
+        # Force joyomni_ops's torch.ops.load_library() to happen here, on the main
+        # thread, before _dit_worker/_encode_worker/etc. exist. sgl_fused_ops._try_import()
+        # is lazy -- its first real call has been observed happening from inside a
+        # background worker thread mid-CUDA-graph-capture, which is a fragile place for
+        # a CUDA extension's first dlopen (fails with a downstream, misleading
+        # "cannot import name X from joyomni_ops (unknown location)"). Op registration
+        # via torch.ops is process-global once done, so doing it eagerly here makes
+        # every later worker-thread use just reuse the already-loaded ops.
+        import joyomni_ops  # noqa: F401
+
         device_obj = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         encode_device_arg = vae_encode_device if vae_encode_device is not None else vae_device
         decode_device_arg = vae_decode_device if vae_decode_device is not None else vae_device
