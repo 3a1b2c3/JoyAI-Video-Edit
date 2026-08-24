@@ -63,6 +63,11 @@ def main():
     # Load runtime (same as server uses)
     print("[1/4] Loading models...")
     cfg = ExpConfig()
+    cfg.training_mode = False
+    cfg.dit_ckpt = os.environ.get("JOYOMNI_DIT_CHECKPOINT", "deploy/deps/checkpoints/JoyAI-Video-Edit/dit/joyai_video_edit_dit_0811.pth")
+    cfg.vae_arch_config['pretrained'] = os.environ.get("JOYOMNI_VAE_CHECKPOINT", "deploy/deps/checkpoints/JoyAI-Video-Edit/vae")
+    cfg.text_encoder_arch_config['params']['text_encoder_ckpt'] = os.environ.get("JOYOMNI_TEXT_ENCODER_CHECKPOINT", "deploy/deps/checkpoints/MiMo-VL-7B-RL-2508")
+
     runtime = JoyOmniRuntime.load(cfg, device=device)
     print(f"✓ Models loaded on {device}")
     print()
