@@ -57,14 +57,13 @@ echo ""
 # _C extension is broken/missing -- both have bitten this repo before, so check for
 # real -- exact interpreter used to run infer_standalone.py/the server.
 echo "[3/6] joyomni_ops module..."
-JOYOMNI_CHECK=$(python -c "
+if JOYOMNI_CHECK=$(python -c "
 import joyomni_ops
 assert getattr(joyomni_ops, '__file__', None), 'resolved as a namespace package (no __file__) -- not a real install'
 from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
 from joyomni_ops._C import fp8_scaled_mm, sgl_per_token_quant_fp8
 print(joyomni_ops.__file__)
-" 2>&1)
-if [ $? -eq 0 ]; then
+" 2>&1); then
     echo "  ✓ Installed with FP8 support ($JOYOMNI_CHECK)"
     ((PASSED++))
 else
