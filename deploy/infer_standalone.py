@@ -4,8 +4,11 @@
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
+import cv2
+import numpy as np
 import torch
 from PIL import Image
 
@@ -23,14 +26,12 @@ def parse_args():
     parser.add_argument("--height", type=int, default=480, help="Output height")
     parser.add_argument("--width", type=int, default=864, help="Output width")
     parser.add_argument("--num_steps", type=int, default=30, help="Diffusion steps")
-    parser.add_argument("--guidance_scale", type=float, default=7.5, help="CFG guidance scale")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     return parser.parse_args()
 
 
 def load_video_frame(video_path: str, height: int, width: int) -> torch.Tensor:
     """Load first frame from video"""
-    import cv2
     cap = cv2.VideoCapture(video_path)
     ret, frame = cap.read()
     cap.release()
@@ -44,6 +45,68 @@ def load_video_frame(video_path: str, height: int, width: int) -> torch.Tensor:
     frame_tensor = torch.from_numpy(frame).float() / 255.0
     frame_tensor = frame_tensor.permute(2, 0, 1).unsqueeze(0)
     return frame_tensor
+
+
+def run_v2v_generation(runtime, args, ref_image):
+    """Drive the streaming V2V session over the whole input video and collect decoded frames."""
+    from xvideo.serving.joyomni_streaming import StreamingSettings
+
+    settings = StreamingSettings(
+        height=args.height,
+        width=args.width,
+        num_inference_steps=args.num_steps,
+        seed=args.seed,
+    )
+    session = runtime.create_v2v_session(args.prompt, settings=settings, ref_image=ref_image)
+
+    decoded = []  # list of (seq, rgb_frame)
+
+    def _consume(results):
+        for result in results:
+            jpegs = result.jpegs or []
+            metas = result.source_metas or []
+            valid_count = result.valid_count if result.valid_count is not None else len(jpegs)
+            for jpeg_bytes, meta in list(zip(jpegs, metas))[:valid_count]:
+                bgr = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                decoded.append((meta.get("seq", len(decoded)), rgb))
+
+    cap = cv2.VideoCapture(args.input_video)
+    try:
+        seq = 0
+        while len(decoded) < args.num_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            seq += 1
+            frame = cv2.resize(frame, (args.width, args.height))
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = session.push_frame(
+                Image.fromarray(frame), frame_meta={"seq": seq, "t_capture_ms": 0.0}
+            )
+            _consume(results)
+    finally:
+        cap.release()
+
+    try:
+        session.flush_pending()
+        deadline = time.time() + 120.0
+        misses = 0
+        while misses < 20 and time.time() < deadline:
+            result = session.wait_async_result(timeout=0.5)
+            if result is not None:
+                _consume([result])
+                misses = 0
+            else:
+                misses += 1
+    finally:
+        session.close()
+
+    if not decoded:
+        raise RuntimeError("Generation produced no output frames")
+
+    decoded.sort(key=lambda item: item[0])
+    return np.stack([frame for _, frame in decoded[: args.num_frames]])
 
 
 def main():
@@ -93,24 +156,12 @@ def main():
 
     # Generate
     print(f"[{step_num}/4] Generating...")
-    with torch.no_grad():
-        output = runtime.pipeline(
-            prompt=args.prompt,
-            num_inference_steps=args.num_steps,
-            guidance_scale=args.guidance_scale,
-            num_frames=args.num_frames,
-            height=args.height,
-            width=args.width,
-        )
-    print(f"✓ Generated")
+    frames = run_v2v_generation(runtime, args, style_img)
+    print(f"✓ Generated {frames.shape[0]} frames")
     print()
 
     # Save
     print("[4/4] Saving output...")
-    if hasattr(output, 'images'):
-        frames = output.images
-    else:
-        frames = output
     import imageio.v3 as iio
     iio.imwrite(args.output, frames, fps=24)
     print(f"✓ Saved: {args.output}")
