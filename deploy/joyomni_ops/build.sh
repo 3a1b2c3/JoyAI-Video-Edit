@@ -185,12 +185,27 @@ else
     echo "  - cutlass headers are missing"
     echo "  - CUDA compiler failed silently"
     echo ""
-    echo "Troubleshoot:"
-    echo "  1. Check build.log: tail -100 build.log"
-    echo "  2. Verify cutlass:  ls -la cutlass/include/cutlass/"
-    echo "  3. Check CUDA:  nvcc --version && which nvcc"
+    log "=== Auto-diagnostics (also appended to $LOG_FILE) ==="
     echo ""
-    echo "Workaround (build without FP8):"
+    echo "-- tail -100 build.log --"
+    tail -100 "$LOG_FILE" | sed 's/^/  /'
+    {
+        echo ""
+        echo "-- cutlass headers --"
+        if [ -d cutlass/include/cutlass ] && [ "$(ls -A cutlass/include/cutlass 2>/dev/null)" ]; then
+            echo "OK: cutlass/include/cutlass/ present ($(ls cutlass/include/cutlass | wc -l) entries)"
+        else
+            echo "MISSING/EMPTY: cutlass/include/cutlass/ -- submodule likely not checked out."
+            echo "Fix: git submodule update --init --recursive"
+        fi
+        echo ""
+        echo "-- CUDA toolchain --"
+        which nvcc || echo "MISSING: nvcc not on PATH"
+        nvcc --version 2>/dev/null | tail -n 4
+        echo "torch.version.cuda: $("$PYTHON" -c 'import torch; print(torch.version.cuda)' 2>/dev/null || echo '<torch import failed>')"
+    } 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
+    echo ""
+    echo "Workaround (build without FP8, only if the above doesn't point to a fixable cause):"
     echo "  JOYOMNI_OPS_NO_FP8=1 $PYTHON -m pip install -e . --force-reinstall"
     exit 1
 fi
