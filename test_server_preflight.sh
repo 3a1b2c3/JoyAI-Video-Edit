@@ -7,6 +7,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$REPO_ROOT"
 
+# Same PYTHONPATH as infer_standalone.sh / deploy/run_server.sh, so this check runs
+# under the same import resolution the real server/inference actually uses.
+export PYTHONPATH="$REPO_ROOT/deploy/joyomni_ops:$REPO_ROOT/deploy:${PYTHONPATH:-}"
+
 echo "=========================================="
 echo "JoyAI Server Pre-Flight Check"
 echo "=========================================="

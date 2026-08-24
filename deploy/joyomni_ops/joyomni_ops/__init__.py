@@ -13,10 +13,25 @@ import torch
 # The extension is a pure TORCH_LIBRARY (no pybind module init), so load the .so
 # with torch.ops.load_library to trigger op registration.
 _here = os.path.dirname(__file__)
-_so = glob.glob(os.path.join(_here, "_C*.so"))
+_so = sorted(glob.glob(os.path.join(_here, "_C*.so")))
 if not _so:
     raise ImportError(f"joyomni_ops C extension not found in {_here}; build it first (pip install .)")
-torch.ops.load_library(_so[0])
+if len(_so) > 1:
+    # Picking [0] from an unordered glob silently risks loading a stale build left
+    # behind by an earlier ABI tag / interrupted build -- fail loudly instead so this
+    # never surfaces later as a confusing "cannot import name X (unknown location)".
+    raise ImportError(
+        f"Multiple _C*.so files found in {_here}: {_so} -- remove the stale one(s) "
+        "and rebuild (bash build.sh) rather than silently picking one."
+    )
+try:
+    torch.ops.load_library(_so[0])
+except Exception as exc:
+    # torch.ops.load_library failing here (e.g. dlopen "undefined symbol") leaves this
+    # module partially initialized -- every name below is never defined, and callers
+    # see a generic "cannot import name X from joyomni_ops (unknown location)" with no
+    # hint of the real cause. Surface it directly instead.
+    raise ImportError(f"joyomni_ops: torch.ops.load_library({_so[0]!r}) failed: {exc!r}") from exc
 
 __all__ = [
     "fused_qk_norm_rope_3d_paired",
