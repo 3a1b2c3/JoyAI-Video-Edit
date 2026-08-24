@@ -14,9 +14,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 
 from xvideo.models.models import load_dit, load_text_encoder, build_vae, load_pipeline
-from xvideo.models.pipeline import Pipeline
 from xvideo.config import ExpConfig
-from xvideo.models.scheduler import FlowMatchEulerScheduler
+from xvideo.models.scheduler import FlowMatchDiscreteScheduler
 
 
 def parse_args():
