@@ -1531,8 +1531,6 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         output_file = None
                         if finalized is not None:
                             app.state.last_recording_dir = str(finalized)
-                            # Find the latest output file
-                            from pathlib import Path
                             segments = sorted(Path(finalized).glob("output_*.mp4"))
                             if segments:
                                 output_file = str(segments[-1])
