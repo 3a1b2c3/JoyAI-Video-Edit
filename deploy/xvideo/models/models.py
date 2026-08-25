@@ -83,7 +83,14 @@ def load_pipeline(cfg, dit, device: torch.device):
         **_arch_params(cfg.text_encoder_arch_config),
     )
 
-    scheduler = FlowMatchDiscreteScheduler(**_arch_params(cfg.scheduler_arch_config))
+    # Create scheduler from architecture parameters
+    scheduler_params = _arch_params(cfg.scheduler_arch_config)
+    scheduler = FlowMatchDiscreteScheduler(
+        num_train_timesteps=scheduler_params.get('num_train_timesteps', 1000),
+        shift=scheduler_params.get('shift', 1.0),
+        reverse=scheduler_params.get('reverse', True),
+        solver=scheduler_params.get('solver', 'euler'),
+    )
 
     pipeline = Pipeline(
         vae=vae,

@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from xvideo.models.pipeline import Pipeline
 from xvideo.models.scheduler import get_scheduler
-from xvideo.models.models import build_vae, build_text_encoder, build_dit
+from xvideo.models.models import build_vae, load_text_encoder, load_dit
 from xvideo.config import ExpConfig
 from xvideo.serving.joyomni_streaming import JoyOmniRuntime, StreamingSettings
 
@@ -39,15 +39,11 @@ def load_models(
     vae = vae.to(device).eval()
     vae.requires_grad_(False)
 
-    # Build and load text encoder
-    text_encoder = build_text_encoder(cfg, device)
-    if Path(text_encoder_ckpt).is_dir():
-        text_encoder = text_encoder.from_pretrained(text_encoder_ckpt).to(device)
-    text_encoder = text_encoder.to(device).eval()
-    text_encoder.requires_grad_(False)
+    # Load text encoder
+    text_encoder = load_text_encoder(cfg, device)
 
-    # Build and load DiT
-    transformer = build_dit(cfg, device)
+    # Load DiT
+    transformer = load_dit(cfg, device)
     transformer.load_state_dict(torch.load(dit_ckpt, map_location=device, weights_only=True))
     transformer = transformer.to(device).eval()
     transformer.requires_grad_(False)
