@@ -31,14 +31,52 @@ curl -L -o "$CKPT_ROOT/face_detection_yunet_2023mar.onnx" \
   https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 
 echo
-echo "Done: DiT, VAE, MiMo-VL, YuNet face detector."
+echo "=== [4/4] YOLOv8n person detector (exporting locally) ==="
 echo
-echo "NOT downloaded (needs a separate throwaway conda env, see DEPLOYMENT.md 3c):"
-echo "  yolov8n.onnx (person detector) -- must be exported locally at imgsz=320;"
-echo "  pre-exported copies on the Hub won't load (wrong input size)."
-echo "  conda create -n yolo-export python=3.10 -y && conda activate yolo-export"
-echo "  pip install --index-url https://pypi.org/simple/ \\"
-echo "    --extra-index-url https://download.pytorch.org/whl/cpu ultralytics onnx onnxslim"
-echo "  pip uninstall -y opencv-python && pip install --index-url https://pypi.org/simple/ opencv-python-headless"
-echo "  python -c \"from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx', imgsz=320, opset=12)\""
-echo "  conda deactivate && mv yolov8n.onnx '$CKPT_ROOT/' && conda env remove -n yolo-export -y"
+
+# Check if already exists
+if [ -f "$CKPT_ROOT/yolov8n.onnx" ]; then
+    echo "✓ YOLOv8n already exists"
+else
+    # Try to export with current environment
+    python << 'PYEOF'
+import os
+from pathlib import Path
+
+ckpt_root = Path(os.environ['CKPT_ROOT'])
+yolo_file = ckpt_root / 'yolov8n.onnx'
+
+if yolo_file.exists():
+    print(f"✓ YOLOv8n exists ({yolo_file.stat().st_size / (1024**2):.1f} MB)")
+else:
+    try:
+        print("Exporting YOLOv8n to ONNX (imgsz=320)...")
+        from ultralytics import YOLO
+        model = YOLO('yolov8n.pt')
+        model.export(format='onnx', imgsz=320, opset=12)
+
+        # Move to checkpoints
+        src = Path('yolov8n.onnx')
+        if src.exists():
+            src.rename(yolo_file)
+            print(f"✓ YOLOv8n exported ({yolo_file.stat().st_size / (1024**2):.1f} MB)")
+        else:
+            print("✗ Export failed")
+            exit(1)
+    except ImportError:
+        print("⚠ ultralytics not installed")
+        print("  Install with: pip install ultralytics")
+        print("  Then re-run: bash download_models.sh")
+        exit(1)
+PYEOF
+fi
+
+echo
+echo "=== All Models Downloaded ==="
+echo
+echo "Checkpoints:"
+du -sh "$CKPT_ROOT"/* 2>/dev/null | sed 's/^/  /'
+echo
+echo "Total: $(du -sh "$CKPT_ROOT" | cut -f1)"
+echo
+echo "Ready to run: bash run_server_best.sh"
