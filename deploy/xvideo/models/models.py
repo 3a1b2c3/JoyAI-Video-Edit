@@ -85,19 +85,7 @@ def load_pipeline(cfg, dit, device: torch.device):
 
     # Create scheduler from architecture parameters
     scheduler_params = _arch_params(cfg.scheduler_arch_config)
-    # @register_to_config prevents normal __init__ parameter passing
-    # Always use no-arg constructor and set config manually
-    scheduler = FlowMatchDiscreteScheduler()
-
-    # Set config from scheduler_params
-    if hasattr(scheduler, 'config'):
-        for key, val in scheduler_params.items():
-            if hasattr(scheduler.config, key):
-                setattr(scheduler.config, key, val)
-            else:
-                logger.warning(f"Scheduler config doesn't have attribute: {key}")
-    else:
-        logger.warning("Scheduler has no config attribute")
+    scheduler = FlowMatchDiscreteScheduler(**scheduler_params)
 
     pipeline = Pipeline(
         vae=vae,

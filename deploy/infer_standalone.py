@@ -22,9 +22,6 @@ from xvideo.serving.joyomni_streaming import JoyOmniRuntime, StreamingSettings
 
 
 def load_models(
-    dit_ckpt: str,
-    vae_ckpt: str,
-    text_encoder_ckpt: str,
     device: str = "cuda:0",
 ) -> Pipeline:
     """Load and initialize the pipeline."""
@@ -33,20 +30,14 @@ def load_models(
     # Load config
     cfg = ExpConfig()
 
-    # Build and load VAE
+    # Load models from config
     vae = build_vae(cfg, device)
-    vae.load_state_dict(torch.load(vae_ckpt, map_location=device, weights_only=True))
-    vae = vae.to(device).eval()
-    vae.requires_grad_(False)
-
-    # Load text encoder
-    text_encoder = load_text_encoder(cfg, device)
-
-    # Load DiT
+    tokenizer, text_encoder = load_text_encoder(
+        text_encoder_ckpt=cfg.text_encoder_arch_config.get("pretrained", "SII-YuanyangYin/Evoke"),
+        device=device,
+        torch_dtype=PRECISION_TO_TYPE[cfg.text_encoder_precision],
+    )
     transformer = load_dit(cfg, device)
-    transformer.load_state_dict(torch.load(dit_ckpt, map_location=device, weights_only=True))
-    transformer = transformer.to(device).eval()
-    transformer.requires_grad_(False)
 
     # Get scheduler
     scheduler = get_scheduler(cfg)
@@ -112,9 +103,6 @@ def infer(
     input_video: str,
     output_path: str,
     image_path: str | None = None,
-    dit_ckpt: str | None = None,
-    vae_ckpt: str | None = None,
-    text_encoder_ckpt: str | None = None,
     device: str = "cuda:0",
     height: int = 480,
     width: int = 840,
@@ -122,13 +110,8 @@ def infer(
     num_inference_steps: int = 25,
 ) -> None:
     """Run inference."""
-    print(f"Loading models from checkpoints...")
-    pipeline = load_models(
-        dit_ckpt=dit_ckpt,
-        vae_ckpt=vae_ckpt,
-        text_encoder_ckpt=text_encoder_ckpt,
-        device=device,
-    )
+    print(f"Loading models...")
+    pipeline = load_models(device=device)
 
     print(f"Loading input video: {input_video}")
     frames = load_video(input_video, height=height, width=width)
@@ -178,11 +161,6 @@ def main():
     parser.add_argument("--output", type=str, help="Output video path (default: output_<timestamp>.mp4)")
     parser.add_argument("--image", type=str, help="Reference/style image for conditioning")
 
-    # Model paths
-    parser.add_argument("--dit_ckpt", type=str, default=None, help="DiT checkpoint path")
-    parser.add_argument("--vae_ckpt", type=str, default=None, help="VAE checkpoint path")
-    parser.add_argument("--text_encoder_ckpt", type=str, default=None, help="Text encoder checkpoint path")
-
     # Inference settings
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to run on (default: cuda:0)")
     parser.add_argument("--height", type=int, default=480, help="Output video height")
@@ -191,17 +169,6 @@ def main():
     parser.add_argument("--num_inference_steps", type=int, default=25, help="Number of inference steps")
 
     args = parser.parse_args()
-
-    # Set default checkpoint paths from environment if not provided
-    dit_ckpt = args.dit_ckpt or Path(os.environ.get("JOYOMNI_DIT_CHECKPOINT", ""))
-    vae_ckpt = args.vae_ckpt or Path(os.environ.get("JOYOMNI_VAE_CHECKPOINT", ""))
-    text_encoder_ckpt = args.text_encoder_ckpt or Path(os.environ.get("JOYOMNI_TEXT_ENCODER_CHECKPOINT", ""))
-
-    if not dit_ckpt or not dit_ckpt.exists():
-        print("ERROR: DiT checkpoint not found")
-        print("Set JOYOMNI_DIT_CHECKPOINT env var or use --dit_ckpt flag")
-        sys.exit(1)
-
     output_path = args.output or f"output_{int(time.time())}.mp4"
 
     infer(
@@ -209,9 +176,6 @@ def main():
         input_video=args.input_video,
         output_path=output_path,
         image_path=args.image,
-        dit_ckpt=str(dit_ckpt),
-        vae_ckpt=str(vae_ckpt),
-        text_encoder_ckpt=str(text_encoder_ckpt),
         device=args.device,
         height=args.height,
         width=args.width,
