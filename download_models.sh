@@ -8,7 +8,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CKPT_ROOT="${JOYOMNI_CKPT_ROOT:-$HERE/deploy/deps/checkpoints}"
+export CKPT_ROOT="${JOYOMNI_CKPT_ROOT:-$HERE/deploy/deps/checkpoints}"
 mkdir -p "$CKPT_ROOT"
 echo "Checkpoints will land under: $CKPT_ROOT"
 echo
