@@ -2440,6 +2440,16 @@ function onRecordingFinalized(msg) {
     return;
   }
   finalizeIsForResult = false;
+  if (msg && msg.output_file) {
+    if (outputResult) {
+      outputResult.src = msg.output_file;
+      outputResult.style.display = "block";
+      if (outputIdleOverlay) outputIdleOverlay.style.display = "none";
+    }
+    if (downloadBubble) downloadBubble.classList.add("show");
+    if (outputWaitOverlay) outputWaitOverlay.style.display = "none";
+    return;
+  }
   if (outputWaitOverlay) outputWaitOverlay.style.display = "";
   if (outputWaitIco) outputWaitIco.textContent = "✨";
   if (outputWaitHint) outputWaitHint.textContent = t("toast_finalizing");
