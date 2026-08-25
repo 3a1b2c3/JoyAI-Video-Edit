@@ -85,23 +85,19 @@ def load_pipeline(cfg, dit, device: torch.device):
 
     # Create scheduler from architecture parameters
     scheduler_params = _arch_params(cfg.scheduler_arch_config)
-    # @register_to_config prevents normal __init__ parameter passing, so we create
-    # an instance and configure it manually
-    try:
-        scheduler = FlowMatchDiscreteScheduler(
-            num_train_timesteps=scheduler_params.get('num_train_timesteps', 1000),
-            shift=scheduler_params.get('shift', 1.0),
-            reverse=scheduler_params.get('reverse', True),
-            solver=scheduler_params.get('solver', 'euler'),
-        )
-    except TypeError:
-        # Fallback: create with defaults and set attributes
-        scheduler = FlowMatchDiscreteScheduler()
+    # @register_to_config prevents normal __init__ parameter passing
+    # Always use no-arg constructor and set config manually
+    scheduler = FlowMatchDiscreteScheduler()
+
+    # Set config from scheduler_params
+    if hasattr(scheduler, 'config'):
         for key, val in scheduler_params.items():
-            if hasattr(scheduler, f'config') and hasattr(scheduler.config, key):
+            if hasattr(scheduler.config, key):
                 setattr(scheduler.config, key, val)
             else:
-                setattr(scheduler, key, val)
+                logger.warning(f"Scheduler config doesn't have attribute: {key}")
+    else:
+        logger.warning("Scheduler has no config attribute")
 
     pipeline = Pipeline(
         vae=vae,
