@@ -5,6 +5,7 @@ deploy/deps/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.venv/
 
 # Runtime artifacts
 deploy/recordings/
