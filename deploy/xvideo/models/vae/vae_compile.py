@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import torch
 import torch.nn as nn
 
@@ -9,6 +11,21 @@ from xvideo.inductor_autotune_fix import install as _install_autotune_fix
 # on-disk autotune results instead of re-running coordinate descent.
 _install_autotune_fix()
 
+# max-autotune benchmarks many triton kernel variants per shape (the long
+# "AUTOTUNE convolution(...)" blocks) -- useful for production throughput, but slow
+# for iterating. Set JOYOMNI_DISABLE_AUTOTUNE=1 to compile with plain "default" mode
+# instead (still torch.compile'd, just no coordinate-descent search). NOT
+# "reduce-overhead" -- that mode enables CUDA graphs, which allocates a large static
+# private-pool memory region on top of this pipeline's own separate whole-chunk graph
+# capture and caused a real CUDA OOM (`X GiB allocated in private pools (e.g., CUDA
+# Graphs)`) on a 47 GiB A40. "max-autotune-no-cudagraphs" (the default below) is
+# explicitly cudagraph-free for the same reason -- keep the disabled-autotune path
+# equally cudagraph-free.
+_COMPILE_MODE = (
+    "default"
+    if os.environ.get("JOYOMNI_DISABLE_AUTOTUNE", "").lower() in {"1", "true", "yes", "on"}
+    else "max-autotune-no-cudagraphs"
+)
 
 _configured: set[int] = set()
 _configured_encode: set[int] = set()
@@ -24,10 +41,10 @@ def maybe_setup_decode(vae) -> None:
             m.weight.data = m.weight.data.to(memory_format=torch.channels_last_3d)
             n_conv += 1
     if hasattr(vae, "_decode"):
-        vae._decode = torch.compile(vae._decode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae._decode = torch.compile(vae._decode, mode=_COMPILE_MODE, dynamic=False)
         target = "_decode"
     elif hasattr(vae, "decode"):
-        vae.decode = torch.compile(vae.decode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae.decode = torch.compile(vae.decode, mode=_COMPILE_MODE, dynamic=False)
         target = "decode"
     else:
         raise RuntimeError("VAE has neither _decode nor decode; cannot compile")
@@ -48,10 +65,10 @@ def maybe_setup_encode(vae) -> None:
             m.weight.data = m.weight.data.to(memory_format=torch.channels_last_3d)
             n_conv += 1
     if hasattr(vae, "_encode"):
-        vae._encode = torch.compile(vae._encode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae._encode = torch.compile(vae._encode, mode=_COMPILE_MODE, dynamic=False)
         target = "_encode"
     elif hasattr(vae, "encode"):
-        vae.encode = torch.compile(vae.encode, mode="max-autotune-no-cudagraphs", dynamic=False)
+        vae.encode = torch.compile(vae.encode, mode=_COMPILE_MODE, dynamic=False)
         target = "encode"
     else:
         raise RuntimeError("VAE has neither _encode nor encode; cannot compile")
@@ -93,7 +110,7 @@ def maybe_setup_encode_dynamic(vae) -> None:
         core = getattr(vae, "encode")
     else:
         raise RuntimeError("VAE has neither _encode nor encode; cannot compile")
-    vae._encode_dynamic = torch.compile(core, mode="max-autotune-no-cudagraphs", dynamic=True)
+    vae._encode_dynamic = torch.compile(core, mode=_COMPILE_MODE, dynamic=True)
     _configured_encode_dynamic.add(id(vae))
     print("[vae_compile] compiled vae._encode_dynamic (dynamic=True, reference-image path)")
 
