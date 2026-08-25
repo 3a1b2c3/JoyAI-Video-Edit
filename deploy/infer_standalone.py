@@ -31,7 +31,7 @@ def load_models(
     device = torch.device(device)
 
     # Load config
-    cfg = ExpConfig.from_pretrained("SII-YuanyangYin/Evoke")
+    cfg = ExpConfig()
 
     # Build and load VAE
     vae = build_vae(cfg, device)
