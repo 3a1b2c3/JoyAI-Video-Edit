@@ -9,6 +9,12 @@ __pycache__/
 
 # Runtime artifacts
 deploy/recordings/
+outputs/
+deploy/joyomni_ops/build.log
+*.log
+
+# Local test assets (input videos/images, not source -- large binaries)
+assets/
 
 # joyomni_ops build artifacts (compiled locally via pip install)
 deploy/joyomni_ops/build/
