@@ -30,6 +30,7 @@ _COMPILE_MODE = (
 _configured: set[int] = set()
 _configured_encode: set[int] = set()
 _configured_encode_dynamic: set[int] = set()
+_warmup_encode_shapes: set[tuple] = set()  # Cache (vae_id, h, w, t) to skip duplicates
 
 
 def maybe_setup_decode(vae) -> None:
@@ -85,6 +86,9 @@ def warmup_encode(vae, in_channels: int, h_px: int, w_px: int,
     dev_type = torch.device(device).type
     use_ac = autocast and dev_type in {"cuda", "cpu"}
     for t in temporal_lens:
+        cache_key = (id(vae), h_px, w_px, t)
+        if cache_key in _warmup_encode_shapes:
+            continue
         x = torch.zeros(1, in_channels, t, h_px, w_px, device=device, dtype=dtype)
         x = prep_input(x)
         ctx = (
@@ -96,6 +100,7 @@ def warmup_encode(vae, in_channels: int, h_px: int, w_px: int,
                 _ = vae.encode(x)
             if torch.cuda.is_available():
                 torch.cuda.synchronize(device)
+            _warmup_encode_shapes.add(cache_key)
             print(f"[vae_compile] warmup compiled encode shape (1,{in_channels},{t},{h_px},{w_px}) autocast={autocast}")
         except Exception as exc:  # noqa: BLE001
             print(f"[vae_compile] encode warmup failed for t={t}: {exc!r}")
