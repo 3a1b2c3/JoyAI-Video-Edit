@@ -14,11 +14,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from xvideo.models.pipeline import Pipeline
+from xvideo.models.pipeline import Pipeline, PRECISION_TO_TYPE
 from xvideo.models.scheduler import get_scheduler
 from xvideo.models.models import build_vae, load_text_encoder, load_dit
 from xvideo.config import ExpConfig
-from xvideo.serving.joyomni_streaming import JoyOmniRuntime, StreamingSettings
 
 
 def load_models(
@@ -46,7 +45,7 @@ def load_models(
     pipeline = Pipeline(
         vae=vae,
         text_encoder=text_encoder,
-        tokenizer=text_encoder.tokenizer,
+        tokenizer=tokenizer,
         transformer=transformer,
         scheduler=scheduler,
         args=cfg,
