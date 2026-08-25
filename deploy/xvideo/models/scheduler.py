@@ -22,6 +22,16 @@ class FlowMatchDiscreteScheduler(SchedulerMixin, ConfigMixin):
     _compatibles = []
     order = 1
 
+
+def get_scheduler(cfg):
+    """Instantiate scheduler from config."""
+    return FlowMatchDiscreteScheduler(
+        num_train_timesteps=getattr(cfg, 'num_train_timesteps', 1000),
+        shift=getattr(cfg, 'shift', 1.0),
+        reverse=getattr(cfg, 'reverse', True),
+        solver=getattr(cfg, 'solver', 'euler'),
+    )
+
     @register_to_config
     def __init__(
         self,

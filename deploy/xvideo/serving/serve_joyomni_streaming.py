@@ -5,6 +5,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import math
 import os
 import queue
@@ -474,6 +475,7 @@ class _SegmentedRecorder:
     def _open_segment(self):
         import av
         path = self._prefix.parent / f"{self._prefix.name}_{self.segments:04d}.mp4"
+        logging.info(f"[OUTPUT] Opening segment: {path}")
         output = av.open(str(path), mode="w")
         stream = output.add_stream(self._codec)
         stream.width = int(self._width)
@@ -498,12 +500,16 @@ class _SegmentedRecorder:
         try:
             for packet in stream.encode():
                 output.mux(packet)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.error(f"[OUTPUT] Encode error: {e}")
         try:
             output.close()
-        except Exception:
-            pass
+            # Log file size after close
+            if hasattr(output, 'name'):
+                fsize = os.path.getsize(output.name) if os.path.exists(output.name) else 0
+                logging.info(f"[OUTPUT] Closed segment: {output.name} ({fsize} bytes)")
+        except Exception as e:
+            logging.error(f"[OUTPUT] Close error: {e}")
 
     def _run(self) -> None:
         try:
