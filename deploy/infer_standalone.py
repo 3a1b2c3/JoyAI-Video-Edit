@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+import time
 import torch
 from pathlib import Path
 from PIL import Image
@@ -106,9 +107,10 @@ def infer(
 
     print(f"Running inference with prompt: {prompt}")
 
-    # Run inference (this is a simplified version - actual implementation depends on pipeline API)
-    # The pipeline might have a __call__ method or other inference methods
+    # Run inference - try multiple inference methods
+    output_frames = None
     try:
+        # Try __call__ method
         if hasattr(pipeline, '__call__'):
             output_frames = pipeline(
                 prompt=prompt,
@@ -118,12 +120,37 @@ def infer(
                 height=height,
                 width=width,
             )
+        # Try generate method
+        elif hasattr(pipeline, 'generate'):
+            output_frames = pipeline.generate(
+                prompt=prompt,
+                video_frames=frames,
+                ref_image=ref_image,
+                num_inference_steps=num_inference_steps,
+                height=height,
+                width=width,
+            )
+        # Try infer method
+        elif hasattr(pipeline, 'infer'):
+            output_frames = pipeline.infer(
+                prompt=prompt,
+                video_frames=frames,
+                ref_image=ref_image,
+                num_inference_steps=num_inference_steps,
+                height=height,
+                width=width,
+            )
         else:
-            raise NotImplementedError("Pipeline inference method not found")
+            available_methods = [m for m in dir(pipeline) if not m.startswith('_')]
+            raise NotImplementedError(
+                f"No inference method found. Available methods: {available_methods}"
+            )
     except Exception as e:
         print(f"Inference error: {e}")
-        print("Note: This is a skeleton implementation - actual inference requires the full pipeline API")
         raise
+
+    if output_frames is None:
+        raise RuntimeError("Pipeline returned no output frames")
 
     print(f"Saving output to: {output_path}")
     save_video(output_frames, output_path, fps=fps)
