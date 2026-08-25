@@ -28,6 +28,9 @@ def load_models(
 
     # Load config
     cfg = ExpConfig()
+    print(f"DEBUG: text_encoder_arch_config = {cfg.text_encoder_arch_config}")
+    print(f"DEBUG: vae_arch_config = {cfg.vae_arch_config}")
+    print(f"DEBUG: dit_ckpt = {cfg.dit_ckpt}")
 
     # Load models from config
     vae = build_vae(cfg, device)

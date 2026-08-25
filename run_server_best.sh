@@ -30,6 +30,7 @@ case "$GPU_NAME" in
   *"RTX PRO 6000"*)
     echo "Profile: RTX PRO 6000 -- 480p @ 24 FPS (DEPLOYMENT.md §4)"
     export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_pro6000}"
+    export JOYOMNI_LOW_VRAM="${JOYOMNI_LOW_VRAM:-1}"
     ;;
   *5090*)
     echo "Profile: RTX 5090 -- 480p @ 24 FPS, low-VRAM (DEPLOYMENT.md §4)"
