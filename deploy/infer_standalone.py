@@ -20,40 +20,14 @@ from xvideo.models.models import build_vae, load_text_encoder, load_dit
 from xvideo.config import ExpConfig
 
 
-def load_models(
-    device: str = "cuda:0",
-) -> Pipeline:
+def load_models(device: str = "cuda:0") -> Pipeline:
     """Load and initialize the pipeline."""
     device = torch.device(device)
-
-    # Load config
     cfg = ExpConfig()
-    print(f"DEBUG: text_encoder_arch_config = {cfg.text_encoder_arch_config}")
-    print(f"DEBUG: vae_arch_config = {cfg.vae_arch_config}")
-    print(f"DEBUG: dit_ckpt = {cfg.dit_ckpt}")
 
-    # Load models from config
-    vae = build_vae(cfg, device)
-    tokenizer, text_encoder = load_text_encoder(
-        text_encoder_ckpt=cfg.text_encoder_arch_config.get("pretrained", "SII-YuanyangYin/Evoke"),
-        device=device,
-        torch_dtype=PRECISION_TO_TYPE[cfg.text_encoder_precision],
-    )
+    from xvideo.models.models import load_pipeline
     transformer = load_dit(cfg, device)
-
-    # Get scheduler
-    scheduler = get_scheduler(cfg)
-
-    # Create pipeline
-    pipeline = Pipeline(
-        vae=vae,
-        text_encoder=text_encoder,
-        tokenizer=tokenizer,
-        transformer=transformer,
-        scheduler=scheduler,
-        args=cfg,
-    )
-    pipeline = pipeline.to(device)
+    pipeline = load_pipeline(cfg, transformer, device)
 
     return pipeline
 
