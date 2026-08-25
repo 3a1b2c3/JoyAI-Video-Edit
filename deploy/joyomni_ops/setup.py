@@ -21,6 +21,18 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 THIS_DIR = Path(__file__).parent.resolve()
 
+# Auto-detect and set CUTLASS directory if not already set
+if "JOYOMNI_OPS_CUTLASS_DIR" not in os.environ:
+    cutlass_dir = THIS_DIR / "cutlass"
+    if cutlass_dir.exists() and (cutlass_dir / "include" / "cutlass").exists():
+        os.environ["JOYOMNI_OPS_CUTLASS_DIR"] = str(cutlass_dir)
+        print(f"[joyomni_ops] Auto-detected CUTLASS: {cutlass_dir}")
+    else:
+        print(f"[joyomni_ops] WARNING: CUTLASS not found at {cutlass_dir}")
+        print(f"  FP8 compilation will fail. Run: git submodule update --init --recursive")
+        if "JOYOMNI_OPS_NO_FP8" not in os.environ:
+            print(f"  Or set: JOYOMNI_OPS_NO_FP8=1 to skip FP8")
+
 
 def _cuda_version():
     """(major, minor) of the nvcc that torch will use, or (0, 0) if unknown."""

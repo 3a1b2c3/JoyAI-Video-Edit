@@ -128,6 +128,16 @@ echo ""
 # Build with FP8
 echo "[4/4] Building joyomni_ops (fp8 enabled)..."
 export JOYOMNI_OPS_CUTLASS_DIR="$HERE/cutlass"
+
+# Fail early if CUTLASS is missing
+if [ ! -f "$JOYOMNI_OPS_CUTLASS_DIR/include/cutlass/arch/arch.h" ]; then
+    echo "ERROR: CUTLASS headers not found at $JOYOMNI_OPS_CUTLASS_DIR"
+    echo "  Expected: $JOYOMNI_OPS_CUTLASS_DIR/include/cutlass/arch/arch.h"
+    echo ""
+    echo "Fix: git submodule update --init --recursive"
+    exit 1
+fi
+
 unset JOYOMNI_OPS_NO_FP8 2>/dev/null || true
 
 # setup.py reads JOYOMNI_OPS_NO_FP8 straight from the environment (see setup.py) --
