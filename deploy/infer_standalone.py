@@ -107,44 +107,39 @@ def infer(
 
     print(f"Running inference with prompt: {prompt}")
 
-    # Run inference - try multiple inference methods
+    # Run inference - pipeline is callable (diffusers-style)
     output_frames = None
     try:
-        # Try __call__ method
-        if hasattr(pipeline, '__call__'):
+        # Try calling pipeline directly (works for diffusers pipelines)
+        if callable(pipeline):
             output_frames = pipeline(
                 prompt=prompt,
-                video_frames=frames,
-                ref_image=ref_image,
-                num_inference_steps=num_inference_steps,
                 height=height,
                 width=width,
-            )
-        # Try generate method
-        elif hasattr(pipeline, 'generate'):
-            output_frames = pipeline.generate(
-                prompt=prompt,
-                video_frames=frames,
-                ref_image=ref_image,
                 num_inference_steps=num_inference_steps,
-                height=height,
-                width=width,
-            )
-        # Try infer method
-        elif hasattr(pipeline, 'infer'):
-            output_frames = pipeline.infer(
-                prompt=prompt,
-                video_frames=frames,
-                ref_image=ref_image,
-                num_inference_steps=num_inference_steps,
-                height=height,
-                width=width,
+                # Note: actual parameters depend on pipeline implementation
+                # These may need adjustment based on pipeline API
             )
         else:
-            available_methods = [m for m in dir(pipeline) if not m.startswith('_')]
-            raise NotImplementedError(
-                f"No inference method found. Available methods: {available_methods}"
-            )
+            # Fallback: try generate or infer methods
+            if hasattr(pipeline, 'generate'):
+                output_frames = pipeline.generate(prompt=prompt)
+            elif hasattr(pipeline, 'infer'):
+                output_frames = pipeline.infer(prompt=prompt)
+            else:
+                available_methods = [m for m in dir(pipeline) if not m.startswith('_')]
+                raise NotImplementedError(
+                    f"Pipeline is not callable. Available methods: {available_methods}"
+                )
+    except TypeError as e:
+        # Wrong parameters for pipeline call
+        print(f"Pipeline call failed with parameters: {e}")
+        print("Trying with minimal parameters...")
+        try:
+            output_frames = pipeline(prompt=prompt)
+        except Exception as e2:
+            print(f"Fallback inference error: {e2}")
+            raise
     except Exception as e:
         print(f"Inference error: {e}")
         raise

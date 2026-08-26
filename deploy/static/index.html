@@ -1669,6 +1669,7 @@ async function start() {
   socket.onmessage = async (event) => {
     if (typeof event.data === "string") {
       const msg = JSON.parse(event.data);
+      console.log("[WS] Message received:", msg.type, msg);
       noteBackendAck(msg);
       if (msg.type === "queue_position") {
         const ahead = Number(msg.ahead != null ? msg.ahead : msg.position) || 0;
@@ -2429,9 +2430,11 @@ async function fetchAndShowResult() {
   }
 }
 function onRecordingFinalized(msg) {
+  console.log("[UI] onRecordingFinalized called", msg);
   if (finalizeWatchdog) { clearTimeout(finalizeWatchdog); finalizeWatchdog = null; }
   downloadPending = false;
   if (msg && msg.ok === false) {
+    console.log("[UI] Recording failed:", msg.message);
     finalizeIsForResult = false;
     stopResultSync();
     if (outputWaitOverlay) outputWaitOverlay.style.display = "none";
@@ -2441,15 +2444,26 @@ function onRecordingFinalized(msg) {
   }
   finalizeIsForResult = false;
   if (msg && msg.output_file) {
+    console.log("[UI] Output file received:", msg.output_file);
     if (outputResult) {
+      console.log("[UI] Setting video src to:", msg.output_file);
       outputResult.src = msg.output_file;
       outputResult.style.display = "block";
+      console.log("[UI] Video element src set, display=block");
       if (outputIdleOverlay) outputIdleOverlay.style.display = "none";
+      console.log("[UI] Idle overlay hidden");
+    } else {
+      console.error("[UI] outputResult element not found!");
     }
-    if (downloadBubble) downloadBubble.classList.add("show");
+    if (downloadBubble) {
+      downloadBubble.classList.add("show");
+      console.log("[UI] Download bubble shown");
+    }
     if (outputWaitOverlay) outputWaitOverlay.style.display = "none";
+    console.log("[UI] Result display complete");
     return;
   }
+  console.log("[UI] No output_file in message, using fetchAndShowResult");
   if (outputWaitOverlay) outputWaitOverlay.style.display = "";
   if (outputWaitIco) outputWaitIco.textContent = "✨";
   if (outputWaitHint) outputWaitHint.textContent = t("toast_finalizing");
