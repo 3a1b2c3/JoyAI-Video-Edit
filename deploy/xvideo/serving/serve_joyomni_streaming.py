@@ -1528,18 +1528,14 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         await _stop_output_task()
                         finalized = rec_base
                         await asyncio.to_thread(_stop_recorders)
-                        output_file = None
                         if finalized is not None:
                             app.state.last_recording_dir = str(finalized)
-                            segments = sorted(Path(finalized).glob("output_*.mp4"))
-                            if segments:
-                                output_file = str(segments[-1])
                         await _send_json({
                             "type": "recording_finalized",
                             "ok": finalized is not None,
                             "message": None if finalized is not None
                             else "No downloadable result yet. Send an edit first.",
-                            "output_file": output_file,
+                            "output_file": "/download_last" if finalized is not None else None,
                         })
                         continue
                     elif msg_type == "frame_meta":
