@@ -19,8 +19,12 @@ echo "=== Creating .venv (python 3.12, matching the existing local setup) ==="
 "$PY_BIN" -m venv .venv
 
 echo
-echo "=== Installing base dependencies (deploy/requirements.txt) ==="
+echo "=== Installing PyTorch for CUDA 13.2 ==="
 .venv/bin/python -m pip install --upgrade pip setuptools wheel
+.venv/bin/python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu132
+
+echo
+echo "=== Installing base dependencies (deploy/requirements.txt) ==="
 .venv/bin/python -m pip install -r deploy/requirements.txt
 
 echo
