@@ -17,4 +17,4 @@ ninja==1.13.0
 websockets==16.0
 openai==2.41.0
 loguru==0.7.3
-ultralytics==8.3.33
+ultralytics>=8.0.0
