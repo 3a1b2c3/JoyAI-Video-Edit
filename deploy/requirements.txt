@@ -1,7 +1,6 @@
 --index-url https://download.pytorch.org/whl/cu132
 torch
 torchvision
-torchaudio
 transformers>=4.57.1,<4.58
 accelerate==1.10.1
 diffusers==0.36.0
@@ -18,3 +17,4 @@ ninja==1.13.0
 websockets==16.0
 openai==2.41.0
 loguru==0.7.3
+ultralytics==8.3.33
