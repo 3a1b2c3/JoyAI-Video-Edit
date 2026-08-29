@@ -610,13 +610,20 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         if args.preload:
             import asyncio
             loop = asyncio.get_event_loop()
-            loop.run_in_executor(None, get_runtime)
+            def load_and_signal():
+                get_runtime()
+                app.state.runtime_ready.set()
+            loop.run_in_executor(None, load_and_signal)
+        else:
+            app.state.runtime_ready.set()
         yield
 
     app = FastAPI(lifespan=lifespan)
     app.state.runtime = None
     app.state.runtime_lock = threading.Lock()
     app.state.inference_lock = threading.Lock()
+    import asyncio
+    app.state.runtime_ready = asyncio.Event()
     app.state.active_session = None
     app.state.ws_debug = {}
 
@@ -767,6 +774,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
+        await app.state.runtime_ready.wait()
         runtime = get_runtime()
         session = None
         ticket = None
