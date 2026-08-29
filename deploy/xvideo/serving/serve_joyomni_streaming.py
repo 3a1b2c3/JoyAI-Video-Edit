@@ -606,8 +606,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # Load models in background thread so server starts listening immediately
         if args.preload:
-            get_runtime()
+            import asyncio
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, get_runtime)
         yield
 
     app = FastAPI(lifespan=lifespan)
