@@ -2,8 +2,7 @@
 <h3 align="center">Real-Time Open-Ended Video Editing with Autoregressive Diffusion</h3>
 
 <p align="center">
-  <a href="https://arxiv.org/pdf/2608.03974"><img src="https://img.shields.io/badge/Paper-arXiv-red" alt="Paper"></a>
-  <a href="#"><img src="https://img.shields.io/badge/Project-JoyAI--Video--Edit-333399" alt="Project"></a>
+  <a href="https://arxiv.org/abs/2608.03974"><img src="https://img.shields.io/badge/Paper-arXiv-red" alt="Paper"></a>
   <a href="https://huggingface.co/jdopensource/JoyAI-Video-Edit"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Checkpoint-JoyAI--Video--Edit-yellow" alt="Hugging Face"></a>
   <a href="https://huggingface.co/spaces/wxDai/joyai-video-edit"><img src="https://img.shields.io/badge/%F0%9F%9A%80%20Demo-Streaming--V2V-orange" alt="Demo"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
@@ -22,7 +21,7 @@ The system combines an MLLM-based condition encoder, a causal video VAE, and a 1
 - 2026.08.24: 🎉 Consumer GPU support landed — real-time streaming video editing on a single GeForce RTX 5090 (32 GB): 840 × 480 @ 24 FPS. **[Deployment Guide](DEPLOYMENT.md)**
 - 2026.08.15: 🎉 Live demo released — real-time streaming video editing on a single RTX PRO 6000 (Blackwell) GPU: 840 × 480 @ 24 FPS or 720p @ 16 FPS. **[Try HuggingFace Demo](https://huggingface.co/spaces/wxDai/joyai-video-edit)**
 - 2026.08.14: 🎉 Released an upgraded checkpoint with significantly stronger reference-image-guided video editing (RV2V), delivering better subject and identity preservation, more faithful reference conditioning, and improved temporal consistency across long streams. Grab the new **[DiT weights](https://huggingface.co/jdopensource/JoyAI-Video-Edit/blob/main/dit/joyai_video_edit_dit_0811.pth)**.
-- 2026.08.05: 🎉 We release the deployment code, [technical report](https://arxiv.org/pdf/2608.03974), and JoyAI-Video-Edit checkpoints. Please check the links above for details.
+- 2026.08.05: 🎉 We release the deployment code, [technical report](https://arxiv.org/abs/2608.03974), and JoyAI-Video-Edit checkpoints. Please check the links above for details.
 
 ## 💎 Highlights
 
@@ -127,9 +126,11 @@ conda activate joyai-video-edit
 python -m pip install -r deploy/requirements.txt
 ```
 
+Then build the in-tree CUDA op library `deploy/joyomni_ops` (**required** — the DiT calls its fused kernels at runtime) and, per GPU, SageAttention / flash-attn-4: follow [`DEPLOYMENT.md` §2](DEPLOYMENT.md#2-prepare-the-environment).
+
 ### 2. Prepare Checkpoints
 
-Download the released weights from the Hugging Face link above. MiMo-VL and the ONNX detector files are external runtime dependencies; see [`DEPLOYMENT.md`](DEPLOYMENT.md) for deployment details.
+Download the released weights from the Hugging Face link above. MiMo-VL is a required external dependency; the ONNX detectors are optional (missing files just disable the corresponding gates). See [`DEPLOYMENT.md`](DEPLOYMENT.md) for details.
 
 ### 3. Launch
 
@@ -144,7 +145,7 @@ Then open:
 http://localhost:8080
 ```
 
-For remote machines, bind the server to `0.0.0.0` and open the selected port, or use SSH port forwarding.
+The server binds `0.0.0.0:8080` by default — for remote machines, just open the port (or use SSH port forwarding).
 
 ## 📚 Citation
 

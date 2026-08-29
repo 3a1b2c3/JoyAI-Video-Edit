@@ -147,8 +147,26 @@
     #netReadout.net-warn { color: #e5343d; font-weight: 700; }
     @media (max-width: 1000px) {
       body { height: auto; min-height: 100vh; overflow: auto; }
-      .stage { grid-template-columns: 1fr; gap: 8px; padding: 4px 10px 8px; }
-      .media-box { aspect-ratio: 9 / 16; margin: 0 8px 8px; }
+      .topbar { padding: 10px 12px; }
+      .topbar .brand { white-space: nowrap; }
+      .topbar .tagline { display: none; }
+      .res-banner { text-wrap: balance; text-wrap: pretty; }
+      /* keep the two panels side by side: portrait video suits two columns */
+      .stage { gap: 8px; padding: 4px 8px 8px; }
+      .vpanel-head { padding: 8px 10px; }
+      .media-box { aspect-ratio: 9 / 16; max-height: 52vh; margin: 0 8px 8px; }
+      .cmdbar { margin: 0 8px 14px; }
+      .cmd-foot .kvreset-field { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
+      .qtier { flex-wrap: wrap; }
+      .qtier button { padding: 7px 12px; }
+      /* debug readouts hide behind the Profiling toggle; #sendHint stays */
+      .latency-row #netReadout, .latency-row #dispLatency, .latency-row #fpsReadout { display: none; }
+      body:has(#profileTimings:checked) .latency-row #netReadout,
+      body:has(#profileTimings:checked) .latency-row #dispLatency,
+      body:has(#profileTimings:checked) .latency-row #fpsReadout { display: inline; }
+    }
+    @media (max-width: 1000px) and (orientation: landscape) {
+      .media-box { aspect-ratio: 16 / 9; max-height: 60vh; }
     }
   </style>
 </head>
@@ -610,6 +628,14 @@ window.addEventListener("resize", updateCropMask);
 if (window.ResizeObserver && camera) {
   try { new ResizeObserver(() => updateCropMask()).observe(camera); } catch (e) {}
 }
+// the camera track rotates with the device; re-pick orientation while idle
+camera.addEventListener("resize", () => {
+  if (usingVideoFile || startingRun || sessionGranted) return;
+  const vw = camera.videoWidth, vh = camera.videoHeight;
+  if (!vw || !vh) return;
+  const want = vh > vw ? "portrait" : "landscape";
+  if (currentOrientation() !== want) applyOrientation(want);
+});
 let ws = null;
 let stream = null;
 let videoFileUrl = null;
