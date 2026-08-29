@@ -178,6 +178,12 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
+        # Warmup CUDA context with small operations
+        _warmup = torch.randn(1, 8, 8, device=build_device, dtype=dtype)
+        torch.cuda.synchronize()
+        del _warmup
+        torch.cuda.empty_cache()
+
         free_b, total_b = torch.cuda.mem_get_info(build_device)
         logger.info(f"[CUDA-DEBUG] After warmup: {free_b/2**30:.1f}/{total_b/2**30:.1f} GiB free")
         logger.info(f"[CUDA-DEBUG] CUDA initialized for {build_device}")
