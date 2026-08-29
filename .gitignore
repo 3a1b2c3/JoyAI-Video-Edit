@@ -19,3 +19,4 @@ deploy/tmp/
 # Hugging Face Space staging + ZeroGPU engine (never commit to the public repo)
 deploy/hf_space/
 deploy/xvideo/serving/zerogpu_engine.py
+.venv/
