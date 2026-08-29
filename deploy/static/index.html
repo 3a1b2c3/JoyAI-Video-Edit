@@ -1078,13 +1078,16 @@ function effectivePlaybackIntervalMs() {
   return Math.max(8, Math.round(base / speed));
 }
 
+// Enable immediate streaming: display frames as soon as they arrive
+const immediateStreamingEnabled = true;
+
 function alignTargetMs() {
   return Math.min(2500, Math.max(200, alignMaxAgeMs + targetOutputQueueDelayMs()));
 }
 
 function pumpOutputFrame() {
   if (!smoothPlaybackEnabled()) return;
-  const T = alignTargetMs();
+  const T = immediateStreamingEnabled ? 0 : alignTargetMs();
   const now = Date.now();
   let shown = 0;
   while (outputFrameQueue.length > 0 && shown < 4) {
