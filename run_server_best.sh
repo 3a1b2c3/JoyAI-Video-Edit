@@ -32,9 +32,11 @@ case "$GPU_NAME" in
     export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_pro6000}"
     ;;
   *5090*)
-    echo "Profile: RTX 5090 -- 480p @ 24 FPS, low-VRAM (DEPLOYMENT.md §4)"
+    echo "Profile: RTX 5090 -- 480p @ 24 FPS, FP4 Echo (DEPLOYMENT.md §4)"
     export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_rtx5090}"
-    export JOYOMNI_SAGE_ATTN="${JOYOMNI_SAGE_ATTN:-1}" JOYOMNI_FP8_FAST_ACCUM="${JOYOMNI_FP8_FAST_ACCUM:-1}" JOYOMNI_LOW_VRAM="${JOYOMNI_LOW_VRAM:-1}"
+    export JOYOMNI_MODEL="${JOYOMNI_MODEL:-echo_fp4}" JOYOMNI_LOW_VRAM="${JOYOMNI_LOW_VRAM:-0}" JOYOMNI_WIDTH="${JOYOMNI_WIDTH:-854}" JOYOMNI_HEIGHT="${JOYOMNI_HEIGHT:-480}" JOYOMNI_FPS="${JOYOMNI_FPS:-24}"
+    export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-12.0a}"
+    export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
     ;;
   *A40*)
     # No explicit DEPLOYMENT.md entry for A40 -- it's a 48 GiB Ampere card, so

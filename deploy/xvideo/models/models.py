@@ -168,6 +168,14 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
     model = Transformer3DModel(
         dtype=dtype, device=build_device, **_arch_params(cfg.dit_arch_config)
     )
+
+    # CUDA warmup before moving model to avoid "device not ready" error
+    if build_device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(build_device)
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        logger.info(f"CUDA initialized for {build_device}")
+
     model.to(device=build_device)
 
     if state_dict is not None:
