@@ -169,14 +169,30 @@ def load_dit(cfg, device: torch.device) -> torch.nn.Module:
         dtype=dtype, device=build_device, **_arch_params(cfg.dit_arch_config)
     )
 
-    # CUDA warmup before moving model to avoid "device not ready" error
+    # CUDA warmup + memory logging before moving model
     if build_device.type == "cuda":
+        free_b, total_b = torch.cuda.mem_get_info(build_device)
+        logger.info(f"[CUDA-DEBUG] Before warmup: {free_b/2**30:.1f}/{total_b/2**30:.1f} GiB free")
+
         torch.cuda.reset_peak_memory_stats(build_device)
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-        logger.info(f"CUDA initialized for {build_device}")
+
+        free_b, total_b = torch.cuda.mem_get_info(build_device)
+        logger.info(f"[CUDA-DEBUG] After warmup: {free_b/2**30:.1f}/{total_b/2**30:.1f} GiB free")
+        logger.info(f"[CUDA-DEBUG] CUDA initialized for {build_device}")
+
+    # Log memory right before model.to()
+    if build_device.type == "cuda":
+        free_b, total_b = torch.cuda.mem_get_info(build_device)
+        logger.info(f"[CUDA-DEBUG] RIGHT BEFORE model.to(): {free_b/2**30:.1f}/{total_b/2**30:.1f} GiB free")
 
     model.to(device=build_device)
+
+    # Log memory after successful model.to()
+    if build_device.type == "cuda":
+        free_b, total_b = torch.cuda.mem_get_info(build_device)
+        logger.info(f"[CUDA-DEBUG] AFTER model.to(): {free_b/2**30:.1f}/{total_b/2**30:.1f} GiB free")
 
     if state_dict is not None:
         for prefix in ("model.", "module.", "transformer."):
