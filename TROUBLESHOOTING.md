@@ -145,3 +145,82 @@ JIT/cuDNN-autotune cost that's much higher than steady-state — plan
 around it (warm up before exposing the UI to real users, or accept the
 first request being slow) rather than assuming steady-state timing
 applies to the first request.
+
+## 8. `no chunk in UI`: lossless/file-source frames silently dropped (RESOLVED)
+
+**Symptom:** server logs show healthy generation (`#####[STREAM] chunk=N
+in_frames=8 out_frames=8 elapsed=0.5s ...` repeating normally, `chunk_done`
+firing in the browser console) but nothing ever renders in the UI, and the
+browser console never shows a single `[WS] Binary frame: ...` line.
+
+**How it was found:** the `/debug` HTTP endpoint
+(`serve_joyomni_streaming.py`'s `@app.get("/debug")`) exposes
+`ws_debug.frames_out`/`ws_debug.output_bytes`. Checking it mid-session
+showed `frames_out: 186` (climbing normally) alongside `output_bytes: 0`
+(flat, never moved) — proof frames were being counted as "sent" without a
+single byte actually leaving the server. That pointed straight at
+`_send_encoded_frames`'s per-frame loop instead of the more commonly
+suspected face/person-presence gate (`gate_state.absent_hold` — checked
+first via a temporary `/debug/gate` endpoint + loud log, both since
+removed once ruled out; see `9adde56`/`2754066` history for that dead end
+if it resurfaces).
+
+**Root cause:** in lossless/file-source mode
+(`payload.source == "file"` client-side -> `lossless_mode = True`
+server-side), `joyomni_streaming.py`'s frame-encode step
+(`get_output_frames`) intentionally returns **raw numpy frames** instead
+of JPEG bytes, to preserve full quality for disk recording. But
+`_send_encoded_frames` in `serve_joyomni_streaming.py` treated any
+non-`bytes` frame as "nothing to send" and `continue`'d straight past the
+websocket send, only ever submitting to `rec_output` (disk). Every
+lossless-mode frame got silently eaten before it could reach the browser.
+
+**Fix** (`serve_joyomni_streaming.py`, the `elif not isinstance(encoded,
+bytes):` branch): JPEG-encode a *preview* copy of the raw frame with
+`cv2.imencode` (same pattern used elsewhere in this file) and fall through
+into the existing shared send path instead of `continue`-ing past it. Disk
+recording is untouched — the shared success path already separately
+submits the original raw `encoded` frame to `rec_output`, so recording
+keeps full lossless quality completely independent of what gets
+JPEG-compressed for the live preview.
+
+**Lesson:** when "the counter says N happened but the effect never shows
+up," check whether the counter increments on a code path that never
+actually performs the visible side effect — `frames_out += 1` living
+right next to a `continue` that skips the send is exactly that trap.
+
+## 9. `joyomni_ops` build/venv mismatches (multiple issues, watch for both)
+
+Two distinct, easily-conflated problems hit together on `pmgb300ws-0304`:
+
+**(a) Wrong venv active.** `deploy/run_server.sh` and its wrapper scripts
+(`run_server_fp4.sh`, `run_server_fp8.sh`, `run_server_best.sh`) do **not**
+activate a `.venv` themselves — they only handle `conda activate` and only
+if `JOYOMNI_CONDA_ENV` is set. They rely entirely on whatever Python venv
+is already active in the calling shell. Since venv activation is pure
+shell state (unaffected by `cd`), it's easy to have a *different* project's
+venv (e.g. `~/JoyAI-Echo/.venv`) still active from earlier in the session
+and not notice — the traceback will show `torch`/other packages loading
+from the wrong repo's `site-packages` path. Always verify before running
+any `run_server_*.sh`:
+```bash
+which python && python -c "import torch; print(torch.__file__)"
+```
+
+**(b) Stale/wrong-target `joyomni_ops` build.** Even with the correct venv
+active, `deploy/joyomni_ops/build.log` (if present) records exactly what
+the *last* build was compiled for — check it before assuming a "missing
+symbol" `ImportError` (e.g. `cannot import name 'fused_norm_scale_shift'`)
+is a code bug. One observed instance: the log showed the extension had
+been built via **WSL2 on the local Windows machine**, targeting an **RTX
+5090 (compute capability 12.0)**, at an old git commit -- completely
+wrong-target for a GB300 datacenter card (different compute capability
+entirely), and possibly from before that symbol existed in source at all.
+`pip install --no-build-isolation ./deploy/joyomni_ops` (DEPLOYMENT.md's
+documented command) must be re-run **on the actual target machine**, with
+the correct venv active, against current source, before the extension can
+be trusted to match the GPU you're actually running on.
+
+There is no separate build script — that `pip install` command (optionally
+with `JOYOMNI_OPS_CUTLASS_DIR=$(pwd)/deploy/tmp/cutlass` set first, per
+DEPLOYMENT.md, for full FP8 kernel support) is the only build path.
