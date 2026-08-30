@@ -709,16 +709,6 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             }
         )
 
-    @app.get("/debug/gate")
-    def debug_gate() -> JSONResponse:
-        """Live snapshot of the face/person-presence gate for the active
-        websocket session. If output frames are being generated
-        (chunk_done firing) but never reaching the browser, check
-        gate_state.absent_hold here first -- _send_encoded_frames drops
-        every frame silently when it's true."""
-        gate_state = getattr(app.state, "gate_state", None)
-        return JSONResponse({"ok": True, "ts": time.time(), "gate_state": gate_state})
-
     @app.post("/load")
     def load() -> JSONResponse:
         started = time.time()
@@ -877,11 +867,6 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 return 0
 
             if gate_state.get("absent_hold"):
-                print(
-                    f"#####[GATE] dropping {len(encoded_frames)} encoded frame(s): "
-                    f"absent_hold=True (gate_state={gate_state})",
-                    flush=True,
-                )
                 return 0
             count = len(encoded_frames)
             if not source_metas:
@@ -1333,7 +1318,6 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             await _send_json({"type": "session_granted"})
 
             app.state.ws_debug = ws_debug
-            app.state.gate_state = gate_state
 
             HOLDER_IDLE_TIMEOUT_S = 10.0
             last_activity = time.monotonic()
