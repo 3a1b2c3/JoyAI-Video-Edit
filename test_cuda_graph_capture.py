@@ -43,10 +43,16 @@ def make_run_fn(lins, x, use_loop: bool, use_kvcache: bool):
         stage = torch.zeros(NUM_LAYERS, 4096, 128, device=DEVICE, dtype=DTYPE)
 
     def run_once():
-        h = x
+        # Each layer applied independently to the same input (not chained --
+        # real per-block Linears project 3072->9216 then back down to 3072
+        # via attention/proj before the next block; chaining identical
+        # Linear(3072,9216) layers here would be a shape mismatch, and isn't
+        # the thing under test anyway).
+        out = None
         for lin in lins:
-            h = lin(h)
-        return h
+            y = lin(x)
+            out = y if out is None else out + y
+        return out
 
     def run_full():
         if not use_loop:

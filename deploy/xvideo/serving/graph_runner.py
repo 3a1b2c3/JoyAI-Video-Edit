@@ -9,6 +9,15 @@ import torch
 from xvideo.models.dit.rope import apply_rotary_emb
 
 GRAPH_ENV = "JOYOMNI_CUDA_GRAPH"
+_DEBUG = os.environ.get("JOYOMNI_DEBUG_GRAPH", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _dbg(msg: str) -> None:
+    # Plain host-side print only -- no CUDA calls (sync, alloc, etc.) here,
+    # since this fires from inside torch.cuda.graph(...) capture too, where
+    # anything CUDA-side is invalid.
+    if _DEBUG:
+        print(f"[DEBUG graph] {msg}", flush=True)
 
 # The captured graph's KV pool is laid out as exactly [sink, prev1(, ref)]:
 # an eager window [0, k-1, k] of this length is the only shape it can serve.
