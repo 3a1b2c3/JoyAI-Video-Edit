@@ -1309,6 +1309,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             await _send_json({"type": "session_granted"})
 
             app.state.ws_debug = ws_debug
+            app.state.gate_state = gate_state
 
             HOLDER_IDLE_TIMEOUT_S = 10.0
             last_activity = time.monotonic()

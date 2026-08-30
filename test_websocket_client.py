@@ -53,8 +53,23 @@ def encode_ref_image(path: Path) -> str | None:
     return f"data:image/png;base64,{data}"
 
 
+def normalize_host(raw_host: str) -> str:
+    """Strip a scheme/path if someone pastes a full URL into --host."""
+    host = raw_host.strip()
+    for scheme in ("ws://", "wss://", "http://", "https://"):
+        if host.startswith(scheme):
+            host = host[len(scheme):]
+            break
+    host = host.split("/", 1)[0]
+    host = host.split(":", 1)[0]
+    return host
+
+
 async def run(args: argparse.Namespace) -> None:
-    uri = f"ws://{args.host}:{args.port}/ws"
+    host = normalize_host(args.host)
+    if host != args.host:
+        print(f"normalized --host {args.host!r} -> {host!r}")
+    uri = f"ws://{host}:{args.port}/ws"
     print(f"connecting to {uri}")
     async with websockets.connect(uri, max_size=None) as ws:
         start_payload = {
