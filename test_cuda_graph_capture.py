@@ -20,10 +20,9 @@ v1/v2, which only ever called cuBLAS via nn.Linear -- so v1/v2 "working"
 was never evidence against a bug in these kernels specifically.
 
 Usage:
-    python test_cuda_graph_capture.py                          # v1 baseline
-    python test_cuda_graph_capture.py --loop --kvcache          # v2
-    python test_cuda_graph_capture.py --joyomni                 # v3, single call
-    python test_cuda_graph_capture.py --joyomni --loop --kvcache  # v3, full
+    python test_cuda_graph_capture.py                     # default: joyomni+loop+kvcache (closest to real run_full())
+    python test_cuda_graph_capture.py --no-joyomni --no-loop --no-kvcache  # v1 baseline (plain Linear, single call)
+    python test_cuda_graph_capture.py --no-joyomni         # v2 (plain Linear, loop+kvcache)
 """
 import argparse
 import os
@@ -138,11 +137,14 @@ def make_run_fn(run_once, use_loop: bool, use_kvcache: bool, kv_shape):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--loop", action="store_true", help="wrap in a multi-step Python loop")
-    parser.add_argument("--kvcache", action="store_true", help="add KV-cache-style .copy_() writes")
-    parser.add_argument("--joyomni", action="store_true",
+    parser.add_argument("--loop", action=argparse.BooleanOptionalAction, default=True,
+                         help="wrap in a multi-step Python loop (default: on)")
+    parser.add_argument("--kvcache", action=argparse.BooleanOptionalAction, default=True,
+                         help="add KV-cache-style .copy_() writes (default: on)")
+    parser.add_argument("--joyomni", action=argparse.BooleanOptionalAction, default=True,
                          help="use real joyomni_ops kernels (fused_layernorm_modulate, "
-                              "fused_qk_norm_rope_3d, rmsnorm_qk_bf16) instead of plain Linear")
+                              "fused_qk_norm_rope_3d, rmsnorm_qk_bf16) instead of plain Linear "
+                              "(default: on)")
     args = parser.parse_args()
 
     print(f"Config: loop={args.loop} kvcache={args.kvcache} joyomni={args.joyomni}")
