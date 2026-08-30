@@ -91,7 +91,7 @@ class StreamingSettings:
     # Per-session override; server-wide default still settable via
     # JOYOMNI_REF_IMAGE_STRENGTH without every caller needing to pass it.
     ref_image_strength: float = field(
-        default_factory=lambda: float(os.environ.get("JOYOMNI_REF_IMAGE_STRENGTH", "1.0"))
+        default_factory=lambda: float(os.environ.get("JOYOMNI_REF_IMAGE_STRENGTH", "3.0"))
     )
 
 @dataclass

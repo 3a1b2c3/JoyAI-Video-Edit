@@ -323,6 +323,11 @@
   <div id="maxTemporalIdsWrap"><input id="maxTemporalIds" type="number" value="8" min="1" step="1" /></div>
   <label><input id="freezeKvOnStatic" type="checkbox" /> <span data-i18n="freeze_kv">静止时冻结 KV</span></label>
   <input id="staticDiffThresh" type="number" value="2.0" min="0" step="0.5" />
+  <div class="row">
+    <label for="refImageStrength">Ref image strength</label>
+    <input id="refImageStrength" type="range" min="0" max="4" step="0.1" value="3.0" />
+    <span id="refImageStrengthVal">3.0</span>
+  </div>
 </div>
 <canvas id="capture" style="display:none"></canvas>
 <div id="refLightbox" class="ref-lightbox"><img id="refLightboxImg" alt="reference enlarged" /></div>
@@ -1671,6 +1676,7 @@ async function beginSession() {
   const sdt = parseFloat(document.getElementById("staticDiffThresh").value);
   startPayload.static_diff_thresh = Number.isFinite(sdt) ? sdt : 0.5;
   startPayload.profile_timings = document.getElementById("profileTimings").checked;
+  startPayload.ref_image_strength = Number(document.getElementById("refImageStrength").value);
   sessionProfileTimings = startPayload.profile_timings;
   stageTimingsPanel.style.display = sessionProfileTimings ? "" : "none";
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -2540,10 +2546,15 @@ document.getElementById("useMaxTemporalIds").addEventListener("change", () => {
   updateMaxTemporalIdsVisibility();
   updateMetrics();
 });
-for (const id of ["width", "height", "cameraFps", "fps", "quality", "steps", "usePe", "refImage", "smoothPlayback", "targetQueueDelayMs", "maxQueueDelayMs", "kvResetFrames", "useMaxTemporalIds", "maxTemporalIds", "freezeKvOnStatic", "staticDiffThresh", "profileTimings", "dbgGateEnabled"]) {
+for (const id of ["width", "height", "cameraFps", "fps", "quality", "steps", "usePe", "refImage", "smoothPlayback", "targetQueueDelayMs", "maxQueueDelayMs", "kvResetFrames", "useMaxTemporalIds", "maxTemporalIds", "freezeKvOnStatic", "staticDiffThresh", "profileTimings", "dbgGateEnabled", "refImageStrength"]) {
   document.getElementById(id).addEventListener("input", updateMetrics);
   document.getElementById(id).addEventListener("change", updateMetrics);
 }
+const refImageStrengthEl = document.getElementById("refImageStrength");
+const refImageStrengthValEl = document.getElementById("refImageStrengthVal");
+refImageStrengthEl.addEventListener("input", () => {
+  refImageStrengthValEl.textContent = Number(refImageStrengthEl.value).toFixed(1);
+});
 var upqTierEl = document.getElementById("upqTier");
 const qualityLegacyEl = document.getElementById("quality");
 function highlightUpqTier(which) {

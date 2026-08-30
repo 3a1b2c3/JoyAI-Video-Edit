@@ -548,7 +548,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         use_inference_kv_cache: bool = False,
         source_id_rope_dim: int = 128,
         source_id_rope_theta: float = 256.0,
-        ref_image_kv_strength: float = 1.0,
+        ref_image_kv_strength: float = 3.0,
     ):
         if chunk_size is not None and chunk_size <= 0:
             raise ValueError(f"`chunk_size` must be positive when provided, got {chunk_size}.")

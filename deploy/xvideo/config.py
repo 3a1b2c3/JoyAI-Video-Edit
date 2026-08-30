@@ -41,7 +41,7 @@ class ExpConfig:
                 # competition against other tokens, just how much gets
                 # pulled through when the model does attend to it).
                 # Overridable per-run via JOYOMNI_REF_IMAGE_STRENGTH.
-                "ref_image_kv_strength": 1.0,
+                "ref_image_kv_strength": 3.0,
             },
         }
     )
