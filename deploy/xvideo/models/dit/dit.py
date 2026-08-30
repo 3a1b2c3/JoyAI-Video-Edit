@@ -354,14 +354,6 @@ class MMDoubleStreamBlock(nn.Module):
             bias=self.img_norm1.bias if self.img_norm1.elementwise_affine else None,
             eps=self.img_norm1.eps,
         )
-        if os.environ.get("JOYOMNI_DEBUG_FP8_FORK"):
-            _w = self.img_attn_qkv.weight
-            print(
-                f"[DEBUG fp8-fork] block={id(self)} _fp8_on={_fp8_on} "
-                f"_fp8_img_installed={getattr(self, '_fp8_img_installed', False)} "
-                f"img_attn_qkv.weight.shape={tuple(_w.shape)} numel={_w.numel()}",
-                flush=True,
-            )
         img_qkv = self._fp8_img_attn_qkv(img_modulated) if _fp8_on else self.img_attn_qkv(img_modulated)
         _iv = img_qkv.view(img_qkv.shape[0], img_qkv.shape[1], 3, self.heads_num, -1)
         img_q, img_k, img_v = _iv[:, :, 0], _iv[:, :, 1], _iv[:, :, 2]

@@ -208,8 +208,7 @@ def main() -> None:
 
     print()
     print("Both capture attempt and post-capture eager call completed without error.")
-    print("This config does NOT reproduce the server's crash. Try --joyomni and/or")
-    print("--loop/--kvcache if not already set, to get closer to the real run_full().")
+    print("This config does NOT reproduce the server's crash.")
 
 
 if __name__ == "__main__":
