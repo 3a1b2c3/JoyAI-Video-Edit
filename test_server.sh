@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "=== Starting server..."
-bash run_server_fp4.sh > server_test.log 2>&1 &
+bash run_server_bf16.sh > server_test.log 2>&1 &
 SERVER_PID=$!
 echo "Server PID: $SERVER_PID"
 echo

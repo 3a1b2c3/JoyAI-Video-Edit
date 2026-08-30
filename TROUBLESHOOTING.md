@@ -94,11 +94,11 @@ server's own host against `127.0.0.1`, but any other machine gets
 (line ~2004). `deploy/run_server.sh` overrides this correctly
 (`HOST="${JOYOMNI_HOST:-0.0.0.0}"`, line 55, passed as `--host "$HOST"`)
 — but only if the server was actually launched *through* that script (or
-`run_server_best.sh`/`run_server_fp4.sh`, which both chain into it). If
+`run_server_best.sh`/`run_server_bf16.sh`, which both chain into it). If
 something invoked `serve_joyomni_streaming.py` directly, or an env var
 leaked `JOYOMNI_HOST=127.0.0.1` in, the override never applies.
 
-**Fix:** always launch via `bash run_server_fp4.sh` (or
+**Fix:** always launch via `bash run_server_bf16.sh` (or
 `run_server_best.sh`), never the raw Python entrypoint directly. Confirm
 the actual bind address before testing remotely:
 
@@ -106,21 +106,22 @@ the actual bind address before testing remotely:
 ss -ltnp 2>/dev/null | grep 8080   # look for 0.0.0.0:8080 or *:8080, not 127.0.0.1:8080
 ```
 
-## 5. `run_server_fp4.sh` hardcoded low-VRAM mode on any GPU (FIXED)
+## 5. `run_server_bf16.sh` (formerly `run_server_fp4.sh`) hardcoded low-VRAM mode on any GPU (FIXED)
 
 **Symptom:** on a 95GB card with only ~41GB actually in use (no VRAM
 pressure at all), the server still paid the low-VRAM tax: block-by-block
 DiT staging + text-encoder CPU offload (added H2D transfer latency per
 prompt encode) — pure downside, no benefit.
 
-**Cause:** `run_server_fp4.sh` had `export JOYOMNI_LOW_VRAM=1` hardcoded
-unconditionally, which shadowed `run_server_best.sh`'s own GPU
-auto-detection (`run_server_best.sh` already picks `JOYOMNI_LOW_VRAM=0`
-on >48 GiB cards, `=1` on ≤48 GiB, per `DEPLOYMENT.md` §4) — the
-auto-detect logic never got a chance to run because the variable was
-already set before `run_server_best.sh` was even invoked.
+**Cause:** `run_server_bf16.sh` (then named `run_server_fp4.sh`) had
+`export JOYOMNI_LOW_VRAM=1` hardcoded unconditionally, which shadowed
+`run_server_best.sh`'s own GPU auto-detection (`run_server_best.sh`
+already picks `JOYOMNI_LOW_VRAM=0` on >48 GiB cards, `=1` on ≤48 GiB, per
+`DEPLOYMENT.md` §4) — the auto-detect logic never got a chance to run
+because the variable was already set before `run_server_best.sh` was
+even invoked.
 
-**Fix:** removed the hardcoded export from `run_server_fp4.sh`; GPU
+**Fix:** removed the hardcoded export from `run_server_bf16.sh`; GPU
 auto-detection in `run_server_best.sh` now actually applies. Still
 overridable by exporting `JOYOMNI_LOW_VRAM` yourself before running
 either script.
@@ -194,7 +195,7 @@ right next to a `continue` that skips the send is exactly that trap.
 Two distinct, easily-conflated problems hit together on `pmgb300ws-0304`:
 
 **(a) Wrong venv active.** `deploy/run_server.sh` and its wrapper scripts
-(`run_server_fp4.sh`, `run_server_fp8.sh`, `run_server_best.sh`) do **not**
+(`run_server_bf16.sh`, `run_server_fp8.sh`, `run_server_best.sh`) do **not**
 activate a `.venv` themselves — they only handle `conda activate` and only
 if `JOYOMNI_CONDA_ENV` is set. They rely entirely on whatever Python venv
 is already active in the calling shell. Since venv activation is pure

@@ -55,8 +55,7 @@ if [ $? -eq 0 ]; then
   echo "Location: $ECHO_CACHE"
   echo
   echo "Ready to run:"
-  echo "  export JOYOMNI_MODEL=echo_fp4"
-  echo "  bash run_server_fp4.sh"
+  echo "  bash run_server_bf16.sh"
 else
   echo "Download failed"
   exit 1
