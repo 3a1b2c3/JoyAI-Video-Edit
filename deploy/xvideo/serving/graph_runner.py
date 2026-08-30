@@ -110,9 +110,11 @@ class StreamingGraphRunner:
         torch.cuda.synchronize(self.device)
 
         def run_denoise():
+            _dbg("run_denoise: enter")
             with self.autocast_ctx():
                 with tf.cache_context("cond"):
-                    return tf(
+                    _dbg("run_denoise: calling tf(...)")
+                    result = tf(
                         hidden_states=self.in_latent,
                         timestep=self.in_timestep,
                         encoder_hidden_states=self.in_prompt,
@@ -125,10 +127,14 @@ class StreamingGraphRunner:
                         kv_cache_selected_chunk_ids=[],
                         kv_cache_pre_rope=True,
                     )[0]
+                    _dbg("run_denoise: tf(...) returned OK")
+                    return result
 
         def run_store():
+            _dbg("run_store: enter")
             with self.autocast_ctx():
                 with tf.cache_context("cond"):
+                    _dbg("run_store: calling tf(...)")
                     tf(
                         hidden_states=self.in_store_latent,
                         timestep=self.in_store_timestep,
@@ -142,26 +148,32 @@ class StreamingGraphRunner:
                         kv_cache_pre_rope=True,
                         skip_text_stream=True,
                     )
+                    _dbg("run_store: tf(...) returned OK")
 
         def run_commit():
+            _dbg("run_commit: enter")
             seg = slice(self.prev1_off, self.prev1_off + self.chunk_tokens)
             for li in range(self.num_layers):
                 roped = apply_rotary_emb(self.stage_k[li], (self.commit_cos, self.commit_sin))
                 self.pool_k[li, :, seg].copy_(roped)
                 self.pool_v[li, :, seg].copy_(self.stage_v[li])
+            _dbg("run_commit: done")
 
         ts_vals = [float(t) for t in timesteps]
         dt_vals = [float(sigmas[i + 1] - sigmas[i]) for i in range(len(ts_vals))]
 
         def run_full():
+            _dbg(f"run_full: enter, {len(ts_vals)} denoise steps")
             lat32 = self.in_noise.to(torch.float32)
             tf._graph_kv_assembler = self._pool_assembler
             tf._graph_kv_writer = None
-            for t_val, dt in zip(ts_vals, dt_vals):
+            for step_idx, (t_val, dt) in enumerate(zip(ts_vals, dt_vals)):
+                _dbg(f"run_full: step {step_idx}/{len(ts_vals)} t={t_val} dt={dt}")
                 self.in_latent.copy_(lat32.to(self.dtype))
                 self.in_timestep.fill_(t_val)
                 pred = run_denoise()
                 lat32 = lat32 + pred.to(torch.float32) * dt
+            _dbg("run_full: denoise loop done, calling run_store")
             self.in_store_latent.copy_(lat32.to(self.dtype))
             tf._graph_kv_assembler = None
             tf._graph_kv_writer = self._stage_writer
@@ -170,14 +182,19 @@ class StreamingGraphRunner:
             finally:
                 tf._graph_kv_writer = None
             run_commit()
+            _dbg("run_full: exit OK")
             return lat32
 
         try:
+            _dbg("capture(): starting eager warmup run_full()")
             run_full()
+            _dbg("capture(): eager warmup OK, synchronizing")
             torch.cuda.synchronize(self.device)
             g = torch.cuda.CUDAGraph()
+            _dbg("capture(): entering torch.cuda.graph() capture block")
             with torch.cuda.graph(g, pool=mem_pool, capture_error_mode="thread_local"):
                 self.out_latents = run_full()
+            _dbg("capture(): capture block exited OK")
             self.full_graph = g
         finally:
             tf._graph_kv_assembler = None
