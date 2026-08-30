@@ -281,6 +281,57 @@ JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=30 \
 bash deploy/run_server.sh
 ```
 
+**NVIDIA GB300/GB200 — untested by the original authors; inferring the B200
+profile (same Blackwell generation, equal-or-more memory: GB300 measured
+251 GiB here vs B200's ~180 GiB HBM3e). `run_server_best.sh` auto-detects
+this and applies it. Full end-to-end generation not yet confirmed working
+on GB300 as of this writing — the items below are confirmed root causes for
+specific failures hit while getting there, not a confirmed-working recipe:**
+
+```bash
+JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
+JOYOMNI_CONDA_ENV=joyai-video-edit \
+JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_gb300 \
+JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=30 \
+bash deploy/run_server.sh
+```
+
+Known gotchas hit on `pmgb300ws-0304` (aarch64 Grace + Blackwell, driver
+reporting CUDA 13.2, `torch==2.13.0+cu132`):
+
+- **`joyomni_ops` namespace-package shadowing.** `deploy/run_server.sh` sets
+  `PYTHONPATH="$HERE"` (`deploy/`). `deploy/joyomni_ops/` (the nested repo
+  checkout: real package at `deploy/joyomni_ops/joyomni_ops/__init__.py`) has
+  no `__init__.py` of its own, so with only `deploy/` on the path, Python can
+  resolve `import joyomni_ops` to that outer directory as an empty PEP 420
+  namespace package instead of the real, pip-editable-installed one. Symptom:
+  `ImportError: cannot import name 'fused_norm_scale_shift' from 'joyomni_ops'
+  (unknown location)` — the "(unknown location)" is the tell (namespace
+  packages have no single `__file__`). Fixed by prepending the real package's
+  containing directory: `PYTHONPATH="$HERE/joyomni_ops:$HERE"` — a regular
+  package match (has `__init__.py`) wins immediately over a namespace
+  candidate, so ordering it first resolves the ambiguity outright.
+- **Rebuild `joyomni_ops` on the target machine — never copy the compiled
+  extension across GPUs.** See TROUBLESHOOTING.md #9: `deploy/joyomni_ops/
+  build.log` records exactly what the last build targeted. One instance
+  observed the `.so` had been built via WSL2 on an RTX 5090 (compute
+  capability 12.0) and then the whole checkout (including `build/`) was
+  synced to the GB300 box unchanged — `cudaErrorNoKernelImageForDevice` on
+  every `joyomni_ops` kernel call, regardless of FP8/FP4 settings (this is
+  not a quantization issue). Always run `bash build_joyomni_ops.sh` (repo
+  root; wraps `pip install --no-build-isolation`, which fixes the separate
+  `ModuleNotFoundError: No module named 'torch'` you get from a bare
+  `pip install .` under PEP 517 build isolation) on the actual machine before
+  trusting the extension.
+- **Cutlass checkout must be at the exact pinned commit.** The FP8 GEMM
+  kernel (`csrc/fp8_gemm.cu`) `#include <cutlass/arch/arch.h>`. A cutlass
+  clone on the wrong branch/commit can be missing that header entirely —
+  `fatal error: cutlass/arch/arch.h: No such file or directory` even though
+  `-I<cutlass>/include` is correctly on the compiler's include path. Check
+  out the commit `joyomni_ops/README.md` pins (`dcf215af` as of this
+  writing) before building:
+  `cd <cutlass-dir> && git checkout dcf215af`.
+
 **RTX PRO 6000 — 480p @ 24 FPS:**
 
 ```bash

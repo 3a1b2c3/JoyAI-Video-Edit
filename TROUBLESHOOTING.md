@@ -221,6 +221,13 @@ documented command) must be re-run **on the actual target machine**, with
 the correct venv active, against current source, before the extension can
 be trusted to match the GPU you're actually running on.
 
-There is no separate build script — that `pip install` command (optionally
-with `JOYOMNI_OPS_CUTLASS_DIR=$(pwd)/deploy/tmp/cutlass` set first, per
-DEPLOYMENT.md, for full FP8 kernel support) is the only build path.
+Use `bash build_joyomni_ops.sh` (repo root) rather than the raw `pip install`
+command — it wraps that exact command with the checks above (venv, torch/GPU
+compute_cap printed before building) plus a post-build import/symbol check,
+so a wrong-target or stale build fails loudly here instead of surfacing later
+as a confusing runtime error. `JOYOMNI_OPS_CUTLASS_DIR` (default
+`deploy/tmp/cutlass`) still selects the cutlass checkout for full FP8 kernel
+support; `JOYOMNI_OPS_NO_FP8=1` builds the light variant instead. See
+DEPLOYMENT.md's GB300/GB200 section for a case where the cutlass checkout
+itself needs to be at a specific pinned commit or a required header goes
+missing.

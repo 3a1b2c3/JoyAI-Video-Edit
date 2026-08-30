@@ -11,6 +11,10 @@ Ops provided (no sgl-kernel / sglang dependency):
 GPU arch coverage is chosen from the local nvcc version:
   - always: sm_80, sm_89, sm_90
   - CUDA >= 12.8: also sm_100a (B200) and sm_120a (RTX PRO 6000 / RTX 5090)
+  - CUDA >= 13.2 (nvcc --list-gpu-arch includes compute_103): also sm_103a
+    (GB300/GB200 -- confirmed a DIFFERENT compute capability from B200's
+    sm_100a, not covered by it or by sm_120a's PTX; see DEPLOYMENT.md's
+    GB300/GB200 section for the cudaErrorNoKernelImageForDevice this fixes)
 So building on a CUDA 12.8+ toolchain automatically yields Blackwell support.
 """
 import os
@@ -66,6 +70,14 @@ def _gencodes():
             # PTX fallback so newer archs (e.g. sm_121) can JIT.
             "-gencode=arch=compute_120,code=compute_120",
         ]
+        if (mj, mn) >= (13, 2):
+            # GB300/GB200 (sm_103, compute capability 10.3) is a distinct
+            # Blackwell Ultra target -- NOT covered by sm_100a (B200) SASS,
+            # and the compute_120 PTX above can't JIT backward onto a lower
+            # compute capability (10.3 < 12.0). Without this, every
+            # joyomni_ops kernel call on GB300 fails with
+            # cudaErrorNoKernelImageForDevice regardless of FP8/FP4 settings.
+            flags += ["-gencode=arch=compute_103a,code=sm_103a"]
     else:
         # No SASS for sm_100/sm_120 on this toolchain; embed sm_90 PTX so the
         # driver can JIT for Blackwell (sm_100/sm_120) at load time. Correctness
