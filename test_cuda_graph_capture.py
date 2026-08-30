@@ -5,21 +5,38 @@ the CUDA context/stream in a state where a SUBSEQUENT, otherwise-identical
 eager call fails -- even though a fresh eager call worked fine before any
 capture was attempted?
 
-No joyomni_ops/cutlass/FP8 involved -- plain bf16 nn.Linear only, to
-isolate whether this is a CUDA-graph-capture issue independent of FP8.
+v1: plain bf16 nn.Linear only (no joyomni_ops/cutlass/FP8) -- ruled out as
+a repro; capture+replay+post-capture-eager all succeed.
 
-v2: adds the two things v1 (a single Linear call) didn't have, which the
-real run_full() in graph_runner.py does: a Python-level multi-step loop,
-and KV-cache-style .copy_() writes into pre-allocated pool buffers. Each
-is toggleable via CLI flag so we can bisect which one (if either) is what
-actually breaks capture on this GPU.
+v2: added --loop (multi-step Python loop) and --kvcache (KV-cache-style
+.copy_() writes into pre-allocated pool buffers) to get closer to the real
+run_full()'s structure. Still plain nn.Linear -- did not reproduce either.
+
+v3: adds --joyomni, which replaces the plain-Linear compute with the ACTUAL
+joyomni_ops-backed ops dit.py calls unconditionally (regardless of the FP8
+toggle): fused_layernorm_modulate, fused_qk_norm_rope_3d, rmsnorm_qk_bf16
+(deploy/xvideo/models/dit/sgl_fused_ops.py). These were never exercised by
+v1/v2, which only ever called cuBLAS via nn.Linear -- so v1/v2 "working"
+was never evidence against a bug in these kernels specifically.
 
 Usage:
-    python test_cuda_graph_capture.py                    # v1 behavior (baseline)
-    python test_cuda_graph_capture.py --loop              # + multi-step loop
-    python test_cuda_graph_capture.py --loop --kvcache     # + KV-cache-style copies
+    python test_cuda_graph_capture.py                          # v1 baseline
+    python test_cuda_graph_capture.py --loop --kvcache          # v2
+    python test_cuda_graph_capture.py --joyomni                 # v3, single call
+    python test_cuda_graph_capture.py --joyomni --loop --kvcache  # v3, full
 """
 import argparse
+import os
+import sys
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Self-contained: don't rely on the caller having PYTHONPATH set the way
+# deploy/run_server.sh does (deploy/joyomni_ops first, then deploy, so the
+# nested deploy/joyomni_ops/joyomni_ops/ package is what resolves instead of
+# an empty outer namespace package -- see deploy/run_server.sh's PYTHONPATH
+# fix).
+sys.path.insert(0, os.path.join(SCRIPT_DIR, "deploy", "joyomni_ops"))
+sys.path.insert(0, os.path.join(SCRIPT_DIR, "deploy"))
 
 import torch
 
@@ -28,48 +45,92 @@ DTYPE = torch.bfloat16
 NUM_LAYERS = 4
 NUM_STEPS = 4  # matches typical few-step denoising loop counts in this codebase
 
+# Real dit.py dims (confirmed via [DEBUG fp8-fork] server log:
+# img_attn_qkv.weight.shape=(12288, 4096) -> hidden_size=4096, qkv=12288).
+HIDDEN_SIZE = 4096
+HEADS_NUM = 32
+HEAD_DIM = HIDDEN_SIZE // HEADS_NUM
+SEQ_LEN = 4096
+BATCH = 1
+NORM_EPS = 1e-6
+
 
 def build_model():
     lins = [torch.nn.Linear(3072, 9216, bias=True, dtype=DTYPE, device=DEVICE) for _ in range(NUM_LAYERS)]
     return lins
 
 
-def make_run_fn(lins, x, use_loop: bool, use_kvcache: bool):
-    if use_kvcache:
-        # Mirrors graph_runner.py's pool_k/pool_v (static, pre-allocated,
-        # written into via .copy_() from a per-layer "stage" tensor) and
-        # commit_cos/commit_sin (a small buffer swapped per chunk).
-        pool = torch.zeros(NUM_LAYERS, 4096, 128, device=DEVICE, dtype=DTYPE)
-        stage = torch.zeros(NUM_LAYERS, 4096, 128, device=DEVICE, dtype=DTYPE)
+def build_joyomni_inputs():
+    x = torch.randn(BATCH, SEQ_LEN, HIDDEN_SIZE, device=DEVICE, dtype=DTYPE)
+    shift = torch.randn(BATCH, HIDDEN_SIZE, device=DEVICE, dtype=DTYPE)
+    scale = torch.randn(BATCH, HIDDEN_SIZE, device=DEVICE, dtype=DTYPE)
+    qkv_lin = torch.nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE * 3, bias=True, dtype=DTYPE, device=DEVICE)
+    q_norm_weight = torch.randn(HEAD_DIM, device=DEVICE, dtype=DTYPE)
+    k_norm_weight = torch.randn(HEAD_DIM, device=DEVICE, dtype=DTYPE)
+    # cos/sin: real code takes a (..., 1, L, head_dim) tuple, squeezes
+    # leading size-1 dims, then -- since last dim == head_dim -- takes a
+    # ::2 stride (paired rope). float32 like get_1d_rotary_pos_embed output.
+    cos = torch.randn(1, SEQ_LEN, HEAD_DIM, device=DEVICE, dtype=torch.float32)
+    sin = torch.randn(1, SEQ_LEN, HEAD_DIM, device=DEVICE, dtype=torch.float32)
+    return {
+        "x": x, "shift": shift, "scale": scale, "qkv_lin": qkv_lin,
+        "q_norm_weight": q_norm_weight, "k_norm_weight": k_norm_weight,
+        "cos": cos, "sin": sin,
+    }
+
+
+def make_run_once_joyomni(inputs):
+    from xvideo.models.dit import sgl_fused_ops as _sgl_fused
+
+    x = inputs["x"]
+    shift = inputs["shift"]
+    scale = inputs["scale"]
+    qkv_lin = inputs["qkv_lin"]
+    q_norm_weight = inputs["q_norm_weight"]
+    k_norm_weight = inputs["k_norm_weight"]
+    cos = inputs["cos"]
+    sin = inputs["sin"]
 
     def run_once():
-        # Each layer applied independently to the same input (not chained --
-        # real per-block Linears project 3072->9216 then back down to 3072
-        # via attention/proj before the next block; chaining identical
-        # Linear(3072,9216) layers here would be a shape mismatch, and isn't
-        # the thing under test anyway).
-        out = None
-        for lin in lins:
-            y = lin(x)
-            out = y if out is None else out + y
-        return out
+        modulated = _sgl_fused.fused_layernorm_modulate(
+            x, shift=shift, scale=scale, weight=None, bias=None, eps=NORM_EPS,
+        )
+        qkv = qkv_lin(modulated)
+        qkv_v = qkv.view(qkv.shape[0], qkv.shape[1], 3, HEADS_NUM, HEAD_DIM)
+        q, k, v = qkv_v[:, :, 0], qkv_v[:, :, 1], qkv_v[:, :, 2]
+        k_for_cache = _sgl_fused.rmsnorm_qk_bf16(k, k_norm_weight, eps=NORM_EPS)
+        q2, k2 = _sgl_fused.fused_qk_norm_rope_3d(
+            q, k, q_norm_weight=q_norm_weight, k_norm_weight=k_norm_weight,
+            freqs_cis=(cos, sin), eps=NORM_EPS,
+        )
+        return q2 + k2.to(q2.dtype) + v + k_for_cache.to(q2.dtype)
+
+    return run_once
+
+
+def make_run_fn(run_once, use_loop: bool, use_kvcache: bool, kv_shape):
+    if use_kvcache:
+        pool = torch.zeros(*kv_shape, device=DEVICE, dtype=DTYPE)
+        stage = torch.zeros(*kv_shape, device=DEVICE, dtype=DTYPE)
+
+    def do_kvcache_write(out):
+        flat = out.reshape(-1)
+        n = min(flat.numel(), stage.numel())
+        stage.view(-1)[:n].copy_(flat[:n].to(DTYPE))
+        pool.copy_(stage)
 
     def run_full():
         if not use_loop:
             out = run_once()
             if use_kvcache:
-                for li in range(NUM_LAYERS):
-                    stage[li].copy_(out[:4096, :128])
-                    pool[li].copy_(stage[li])
+                do_kvcache_write(out)
             return out
         acc = None
-        for step in range(NUM_STEPS):
+        for _ in range(NUM_STEPS):
             out = run_once()
             acc = out if acc is None else acc + out
             if use_kvcache:
-                for li in range(NUM_LAYERS):
-                    stage[li].copy_(out[:4096, :128])
-                    pool[li].copy_(stage[li])
+                do_kvcache_write(out)
         return acc
 
     return run_full
@@ -79,13 +140,31 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="wrap in a multi-step Python loop")
     parser.add_argument("--kvcache", action="store_true", help="add KV-cache-style .copy_() writes")
+    parser.add_argument("--joyomni", action="store_true",
+                         help="use real joyomni_ops kernels (fused_layernorm_modulate, "
+                              "fused_qk_norm_rope_3d, rmsnorm_qk_bf16) instead of plain Linear")
     args = parser.parse_args()
 
-    print(f"Config: loop={args.loop} kvcache={args.kvcache}")
+    print(f"Config: loop={args.loop} kvcache={args.kvcache} joyomni={args.joyomni}")
     torch.cuda.set_device(0)
-    lins = build_model()
-    x = torch.randn(4096, 3072, device=DEVICE, dtype=DTYPE)
-    run_full = make_run_fn(lins, x, args.loop, args.kvcache)
+
+    if args.joyomni:
+        inputs = build_joyomni_inputs()
+        run_once = make_run_once_joyomni(inputs)
+        kv_shape = (NUM_LAYERS, 4096, 128)
+    else:
+        lins = build_model()
+        x = torch.randn(4096, 3072, device=DEVICE, dtype=DTYPE)
+
+        def run_once():
+            out = None
+            for lin in lins:
+                y = lin(x)
+                out = y if out is None else out + y
+            return out
+        kv_shape = (NUM_LAYERS, 4096, 128)
+
+    run_full = make_run_fn(run_once, args.loop, args.kvcache, kv_shape)
 
     print("[1] Baseline: fresh eager call, no capture attempted yet...")
     out = run_full()
@@ -127,8 +206,8 @@ def main() -> None:
 
     print()
     print("Both capture attempt and post-capture eager call completed without error.")
-    print("This config does NOT reproduce the server's crash. Try adding --loop and/or")
-    print("--kvcache if not already set, to get closer to the real run_full().")
+    print("This config does NOT reproduce the server's crash. Try --joyomni and/or")
+    print("--loop/--kvcache if not already set, to get closer to the real run_full().")
 
 
 if __name__ == "__main__":
