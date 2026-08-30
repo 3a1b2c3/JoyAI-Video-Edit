@@ -19,6 +19,12 @@ def _try_import() -> bool:
     global _AVAILABLE, _FUSED_NORM_SCALE_SHIFT, _FUSED_QK_NORM_ROPE_3D, _RMSNORM
     if _AVAILABLE is not None:
         return _AVAILABLE
+    import joyomni_ops as _joyomni_ops_debug
+    print(
+        f"[DEBUG joyomni_ops] file={getattr(_joyomni_ops_debug, '__file__', None)!r} "
+        f"path={list(getattr(_joyomni_ops_debug, '__path__', []))!r}",
+        flush=True,
+    )
     from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
     _RMSNORM = rmsnorm
     _FUSED_NORM_SCALE_SHIFT = fused_norm_scale_shift

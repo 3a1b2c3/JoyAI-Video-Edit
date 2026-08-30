@@ -28,7 +28,16 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 mkdir -p "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR" "$CUDA_CACHE_PATH"
 
 export PYTHONUNBUFFERED=1
-export PYTHONPATH="$HERE"
+# joyomni_ops/ (a nested repo checkout: $HERE/joyomni_ops/joyomni_ops/__init__.py)
+# has no __init__.py at $HERE/joyomni_ops itself, so with only $HERE on the
+# path, Python can resolve "import joyomni_ops" to that outer directory as an
+# empty PEP 420 namespace package instead of the real one -- symptom is
+# ImportError for real joyomni_ops functions, "(unknown location)" in the
+# error (namespace packages have no single __file__). Putting the real
+# package's containing directory first makes Python find the actual
+# (regular, __init__.py-having) package immediately, which always wins over
+# a namespace candidate.
+export PYTHONPATH="$HERE/joyomni_ops:$HERE"
 echo "PYTHONPATH=$PYTHONPATH"
 
 export JOYOMNI_FP8_IMG="${JOYOMNI_FP8_IMG:-1}"
