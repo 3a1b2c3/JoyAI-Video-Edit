@@ -1467,6 +1467,14 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         _align = runtime.pipeline.vae.stem.stride * 8
                         _sh = _snap_to_align(int(payload.get("height", args.height)), _align)
                         _sw = _snap_to_align(int(payload.get("width", args.width)), _align)
+                        _ref_strength_default = StreamingSettings.__dataclass_fields__["ref_image_strength"].default_factory()
+                        # No empirically-validated safe range yet -- 0 disables
+                        # the ref image's KV contribution outright (harmless);
+                        # negative values are nonsensical for a readout scale;
+                        # clamp the top end generously since over-amplification
+                        # degrades gracefully (edit collapses toward a static
+                        # copy of the reference) rather than crashing.
+                        _ref_strength = max(0.0, min(4.0, float(payload.get("ref_image_strength", _ref_strength_default))))
                         session_settings = StreamingSettings(
                             height=_sh,
                             width=_sw,
@@ -1477,6 +1485,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                             static_diff_thresh=static_diff_thresh,
                             profile_timings=bool(payload.get("profile_timings", args.profile_timings)),
                             output_codec=output_codec,
+                            ref_image_strength=_ref_strength,
                         )
 
                         print("#####[RESTART] creating new session", flush=True)

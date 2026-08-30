@@ -570,10 +570,11 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
 
         self.source_id_rope_dim = int(source_id_rope_dim)
         self.source_id_rope_theta = float(source_id_rope_theta)
-        _env_strength = os.environ.get("JOYOMNI_REF_IMAGE_STRENGTH")
-        self.ref_image_kv_strength = (
-            float(_env_strength) if _env_strength else float(ref_image_kv_strength)
-        )
+        # Streaming sessions overwrite this per-session from
+        # StreamingSettings.ref_image_strength (itself defaulting from
+        # JOYOMNI_REF_IMAGE_STRENGTH) right before the ref-image KV prefill;
+        # this constructor default only matters for non-streaming callers.
+        self.ref_image_kv_strength = float(ref_image_kv_strength)
 
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()

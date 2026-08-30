@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -88,6 +88,11 @@ class StreamingSettings:
     store_clean_self_only: bool = True
     profile_timings: bool = False
     output_codec: str = "mjpeg"
+    # Per-session override; server-wide default still settable via
+    # JOYOMNI_REF_IMAGE_STRENGTH without every caller needing to pass it.
+    ref_image_strength: float = field(
+        default_factory=lambda: float(os.environ.get("JOYOMNI_REF_IMAGE_STRENGTH", "1.0"))
+    )
 
 @dataclass
 class StreamingChunkResult:
@@ -655,6 +660,7 @@ class JoyOmniV2VStreamingSession:
         self._clear_vae_feature_caches()
         self.pipeline.transformer.reset_inference_kv_cache()
         if self.ref_image_latent is not None:
+            self.pipeline.transformer.ref_image_kv_strength = self.settings.ref_image_strength
             self.pipeline._prefill_static_reference_kv_cache(
                 self.pipeline.transformer,
                 prompt_embeds=self.streaming_cond_embeds,
