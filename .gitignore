@@ -20,3 +20,10 @@ deploy/tmp/
 deploy/hf_space/
 deploy/xvideo/serving/zerogpu_engine.py
 .venv/
+
+# Logs
+*.log
+server.log
+server_test.log
+download.log
+final_output.log
