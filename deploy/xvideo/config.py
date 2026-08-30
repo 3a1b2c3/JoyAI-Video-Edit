@@ -34,6 +34,14 @@ class ExpConfig:
                 "global_sink_chunk": True,
                 "source_id_rope_dim": 128,
                 "source_id_rope_theta": 256.0,
+                # Multiplies the reference image's cached self-attention
+                # value tensors so its content contributes more strongly to
+                # every subsequent denoising step's output (readout
+                # amplification -- doesn't change attention-weight
+                # competition against other tokens, just how much gets
+                # pulled through when the model does attend to it).
+                # Overridable per-run via JOYOMNI_REF_IMAGE_STRENGTH.
+                "ref_image_kv_strength": 1.0,
             },
         }
     )

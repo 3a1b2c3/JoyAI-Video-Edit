@@ -548,6 +548,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         use_inference_kv_cache: bool = False,
         source_id_rope_dim: int = 128,
         source_id_rope_theta: float = 256.0,
+        ref_image_kv_strength: float = 1.0,
     ):
         if chunk_size is not None and chunk_size <= 0:
             raise ValueError(f"`chunk_size` must be positive when provided, got {chunk_size}.")
@@ -569,6 +570,10 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
 
         self.source_id_rope_dim = int(source_id_rope_dim)
         self.source_id_rope_theta = float(source_id_rope_theta)
+        _env_strength = os.environ.get("JOYOMNI_REF_IMAGE_STRENGTH")
+        self.ref_image_kv_strength = (
+            float(_env_strength) if _env_strength else float(ref_image_kv_strength)
+        )
 
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -633,6 +638,8 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             self._kv_assembly_cache = {}
         if not hasattr(self, "_kv_assembly_freqs"):
             self._kv_assembly_freqs = None
+        if not hasattr(self, "_kv_cache_self_attn_mode"):
+            self._kv_cache_self_attn_mode = None
 
     def reset_inference_kv_cache(self) -> None:
         self._ensure_kv_cache_state()
@@ -647,6 +654,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         self._kv_assembly_version = None
         self._kv_assembly_cache = {}
         self._kv_assembly_freqs = None
+        self._kv_cache_self_attn_mode = None
 
     def configure_inference_kv_cache(
         self,
@@ -722,6 +730,9 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
         scope_store = self._get_cache_scope_store()
         if scope_store is None or layer_idx is None or self._kv_cache_chunk_id is None:
             return
+        if (self._kv_cache_self_attn_mode == SELF_ATTN_MODE_REF_IMAGE_CACHE
+                and self.ref_image_kv_strength != 1.0):
+            value = value * self.ref_image_kv_strength
         chunk_store = scope_store.setdefault(self._kv_cache_chunk_id, {})
         chunk_store[layer_idx] = {
             "key": _clone_kv_tensor(key),
@@ -860,6 +871,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin):
             selected_chunk_ids=kv_cache_selected_chunk_ids,
             pre_rope=kv_cache_pre_rope,
         )
+        self._kv_cache_self_attn_mode = self_attn_input_mode
 
         batch_size = hidden_states.shape[0]
         patch_size = tuple(self.patch_size)
