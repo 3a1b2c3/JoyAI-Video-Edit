@@ -163,7 +163,18 @@ class Fp8Linear(nn.Module):
                 num_warps=warps, num_stages=stages,
             )
             return y.reshape(*orig_shape[:-1], self.out_features)
+        if os.environ.get("JOYOMNI_DEBUG_FP8_FORK"):
+            print(
+                f"[DEBUG fp8-linear] pre-quant x_2d.shape={tuple(x_2d.shape)} "
+                f"weight_fp8.shape={tuple(self.weight_fp8.shape)} "
+                f"in_features={self.in_features} out_features={self.out_features}",
+                flush=True,
+            )
         sgl_per_token_quant_fp8(x_2d, x_q, x_scale)
+        if os.environ.get("JOYOMNI_DEBUG_FP8_FORK"):
+            print("[DEBUG fp8-linear] sgl_per_token_quant_fp8 OK, calling fp8_scaled_mm", flush=True)
         y = fp8_scaled_mm(x_q, self.weight_fp8, x_scale, self.weight_scale,
                           out_dtype=self.out_dtype, bias=self.bias)
+        if os.environ.get("JOYOMNI_DEBUG_FP8_FORK"):
+            print("[DEBUG fp8-linear] fp8_scaled_mm OK", flush=True)
         return y.reshape(*orig_shape[:-1], self.out_features)
