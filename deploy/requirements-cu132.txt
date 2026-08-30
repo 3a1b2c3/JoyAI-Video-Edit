@@ -1,0 +1,35 @@
+# CUDA 13.2 variant of requirements.txt.
+#
+# IMPORTANT: unlike a normal patch-version bump, this is a real torch major
+# jump (2.9.1 -> 2.13.0), forced by the cu132 wheel index only publishing
+# torch 2.13.0 there (no 2.9.1+cu132 build exists at all -- verified against
+# https://download.pytorch.org/whl/cu132/torch/ directly, not guessed).
+# Consequences, all real, none optional:
+#   1. Requires Python 3.12+ -- torch 2.13.0+cu132 has no cp310/cp311 wheels.
+#   2. joyomni_ops (deploy/joyomni_ops, the custom FP8 GEMM CUDA extension)
+#      MUST be rebuilt from source against this torch version -- a compiled
+#      extension from the 2.9.1 build will NOT load against 2.13.0's C++ ABI.
+#      See DEPLOYMENT.md's build instructions.
+#   3. transformers/diffusers/accelerate compatibility with torch 2.13.0 is
+#      UNVERIFIED -- the pins below were tested against torch==2.9.1 in the
+#      base requirements.txt, not against 2.13.0. Treat this file as a
+#      starting point to test from, not a guaranteed-working pin set.
+--extra-index-url https://download.pytorch.org/whl/cu132
+torch==2.13.0+cu132
+torchvision==0.28.0+cu132
+transformers>=4.57.1,<4.58
+accelerate==1.10.1
+diffusers==0.36.0
+einops==0.8.2
+numpy==2.2.6
+pillow==12.2.0
+opencv-python-headless==4.13.0.92
+av==13.1.0
+imageio-ffmpeg==0.6.0
+fastapi==0.117.1
+uvicorn==0.37.0
+uvloop==0.22.1
+ninja==1.13.0
+websockets==16.0
+openai==2.41.0
+loguru==0.7.3
