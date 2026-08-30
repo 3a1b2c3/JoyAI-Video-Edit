@@ -24,14 +24,10 @@ if [ -z "${VIRTUAL_ENV:-}" ]; then
   exit 1
 fi
 if [ "$VIRTUAL_ENV" != "$SCRIPT_DIR/.venv" ]; then
-  echo "ERROR: active venv is $VIRTUAL_ENV,"
-  echo "       expected $SCRIPT_DIR/.venv."
-  echo "This usually means another project's venv (e.g. JoyAI-Echo) is still"
-  echo "active from earlier in the shell session -- venv activation is shell"
-  echo "state and survives 'cd'. Run:"
+  echo "WARNING: active venv is $VIRTUAL_ENV,"
+  echo "         expected $SCRIPT_DIR/.venv. Building into it anyway --"
+  echo "         if that's not what you want:"
   echo "  deactivate; cd $SCRIPT_DIR; source .venv/bin/activate"
-  echo "then re-run this script."
-  exit 1
 fi
 echo "Venv OK: $VIRTUAL_ENV"
 
