@@ -190,9 +190,9 @@ up," check whether the counter increments on a code path that never
 actually performs the visible side effect — `frames_out += 1` living
 right next to a `continue` that skips the send is exactly that trap.
 
-## 9. `joyomni_ops` build/venv mismatches (multiple issues, watch for both)
+## 9. `joyomni_ops` build/venv mismatches and GB300-specific gotchas
 
-Two distinct, easily-conflated problems hit together on `pmgb300ws-0304`:
+Five distinct, easily-conflated problems hit together on `pmgb300ws-0304`:
 
 **(a) Wrong venv active.** `deploy/run_server.sh` and its wrapper scripts
 (`run_server_bf16.sh`, `run_server_fp8.sh`, `run_server_best.sh`) do **not**
@@ -232,3 +232,42 @@ support; `JOYOMNI_OPS_NO_FP8=1` builds the light variant instead. See
 DEPLOYMENT.md's GB300/GB200 section for a case where the cutlass checkout
 itself needs to be at a specific pinned commit or a required header goes
 missing.
+
+**(c) Two `.so` locations that can silently drift apart.** A compiled
+`_C*.so` can exist in two places: the pip-installed copy under
+`.venv/.../site-packages/joyomni_ops/`, and an in-tree copy under
+`deploy/joyomni_ops/joyomni_ops/` (the real nested-package location — see
+`## 9(b)` above / the PYTHONPATH namespace-shadowing note in DEPLOYMENT.md).
+`run_server.sh`'s `PYTHONPATH` ordering makes the server always load the
+**in-tree** one, but `build_joyomni_ops.sh`/`pip install` writes fresh
+builds to **site-packages**. If a rebuild only updates one, the two copies
+diverge and the server keeps running against a stale build with no error at
+import time. Check the one that actually matters:
+```bash
+cuobjdump --list-elf deploy/joyomni_ops/joyomni_ops/_C*.so | grep -i sm_103
+```
+and if it's missing or stale relative to a fresh `site-packages` build,
+`cp` the fresh `.so` over the in-tree copy (or re-run the build with the
+in-tree directory as the install target).
+
+**(d) `joyomni_ops`'s gencode list missing GB300 (`sm_103`) entirely.** Even
+with a correct venv, correct cutlass commit, and a build done on-target, the
+extension's `_gencodes()` in `setup.py` only targeted `sm_100a` (B200) and
+`sm_120a` (RTX 5090/PRO 6000) — GB300 is a distinct Blackwell Ultra target,
+compute capability **10.3**, not covered by either (PTX only JITs forward to
+equal-or-newer architectures). Symptom: `cudaErrorNoKernelImageForDevice` on
+every `joyomni_ops` kernel call regardless of FP8/bf16 settings, even though
+the build otherwise looked correct. Fixed by adding
+`-gencode=arch=compute_103a,code=sm_103a` (gated on `nvcc >= 13.2`) to
+`_gencodes()`.
+
+**(e) A failed `torch.cuda.graph()` capture poisons the whole CUDA context.**
+This one is a trap when debugging (d)-style errors: `cudaErrorNoKernelImageForDevice`
+and similar fatal CUDA errors are context-corrupting, not per-call. Once one
+kernel launch inside a `torch.cuda.graph(...)` capture region hits a fatal
+error, *every* subsequent CUDA call in the process — including a completely
+unrelated, definitely-supported plain `torch.nn.Linear` call — starts
+failing with the same latched error. Don't assume the *last* op in a
+traceback is the real culprit if it's downstream of a `#####[GRAPH] capture
+failed` message; the actual failing op is whatever ran first inside that
+capture attempt.

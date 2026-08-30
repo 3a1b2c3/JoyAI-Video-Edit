@@ -36,6 +36,14 @@ case "$GPU_NAME" in
     echo "Profile: NVIDIA GB300/GB200 -- untested, inferring B200's 720p @ 30 FPS profile (same Blackwell generation, >= memory)"
     export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_gb300}"
     export JOYOMNI_WIDTH="${JOYOMNI_WIDTH:-1248}" JOYOMNI_HEIGHT="${JOYOMNI_HEIGHT:-720}" JOYOMNI_FPS="${JOYOMNI_FPS:-30}"
+    # joyomni_ops on this box is built via build_joyomni_ops_gb300.sh, which
+    # defaults to JOYOMNI_OPS_NO_FP8=1 (no FP8 kernels compiled in at all).
+    # deploy/run_server.sh otherwise defaults JOYOMNI_FP8_IMG/TXT to 1 --
+    # without this override, that mismatch produces AttributeError:
+    # '_OpNamespace' 'joyomni_ops' object has no attribute
+    # 'sgl_per_token_quant_fp8' the moment FP8 is actually exercised.
+    echo "  -> FP8 disabled by default on GB300 (joyomni_ops built without FP8 kernels; set JOYOMNI_FP8_IMG/TXT=1 to override if you rebuild with FP8)"
+    export JOYOMNI_FP8_IMG="${JOYOMNI_FP8_IMG:-0}" JOYOMNI_FP8_TXT="${JOYOMNI_FP8_TXT:-0}"
     ;;
   *"RTX PRO 6000"*)
     echo "Profile: RTX PRO 6000 -- 480p @ 24 FPS (DEPLOYMENT.md §4)"

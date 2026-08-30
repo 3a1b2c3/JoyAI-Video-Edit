@@ -281,19 +281,20 @@ JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=30 \
 bash deploy/run_server.sh
 ```
 
-**NVIDIA GB300/GB200 — untested by the original authors; inferring the B200
-profile (same Blackwell generation, equal-or-more memory: GB300 measured
-251 GiB here vs B200's ~180 GiB HBM3e). `run_server_best.sh` auto-detects
-this and applies it. Full end-to-end generation not yet confirmed working
-on GB300 as of this writing — the items below are confirmed root causes for
-specific failures hit while getting there, not a confirmed-working recipe:**
+**NVIDIA GB300/GB200 — inferring the B200 profile (same Blackwell
+generation, equal-or-more memory: GB300 measured 251 GiB here vs B200's
+~180 GiB HBM3e). `run_server_best.sh` auto-detects this and applies it.
+Confirmed working end-to-end on `pmgb300ws-0304` (real-time streaming,
+output frames delivered over the websocket) with FP8 disabled via
+`run_server_bf16.sh` — the items below are the confirmed root causes that
+had to be fixed to get there:**
 
 ```bash
 JOYOMNI_CONDA_SH=/path/to/conda/etc/profile.d/conda.sh \
 JOYOMNI_CONDA_ENV=joyai-video-edit \
 JOYOMNI_CACHE_ROOT=$PWD/deploy/deps/cache_gb300 \
 JOYOMNI_WIDTH=1248 JOYOMNI_HEIGHT=720 JOYOMNI_FPS=30 \
-bash deploy/run_server.sh
+bash run_server_bf16.sh
 ```
 
 Known gotchas hit on `pmgb300ws-0304` (aarch64 Grace + Blackwell, driver
@@ -331,6 +332,32 @@ reporting CUDA 13.2, `torch==2.13.0+cu132`):
   out the commit `joyomni_ops/README.md` pins (`dcf215af` as of this
   writing) before building:
   `cd <cutlass-dir> && git checkout dcf215af`.
+- **`joyomni_ops`'s gencode list didn't target GB300 at all.** GB300 is
+  compute capability **10.3** (`sm_103`) — a distinct Blackwell Ultra target
+  from B200's `sm_100a` and RTX 5090/PRO 6000's `sm_120a`; PTX only
+  forward-JITs to equal-or-newer architectures, so neither of those covers
+  it. Even after rebuilding on-target with a correct cutlass checkout, every
+  `joyomni_ops` kernel call still failed with
+  `cudaErrorNoKernelImageForDevice`. Fixed in `deploy/joyomni_ops/setup.py`'s
+  `_gencodes()`: add `-gencode=arch=compute_103a,code=sm_103a` (gated on
+  `nvcc >= 13.2`). Verify a built extension actually has it:
+  `cuobjdump --list-elf <path-to>/_C*.so | grep -i sm_103`. Note there are
+  two places a compiled `_C*.so` can end up — the pip-installed copy under
+  `.venv/.../site-packages/joyomni_ops/`, and an in-tree copy under
+  `deploy/joyomni_ops/joyomni_ops/` (the actual nested package location);
+  `run_server.sh`'s `PYTHONPATH` ordering makes the **in-tree** one the one
+  that's actually loaded at runtime, so check/rebuild that one specifically
+  if the two ever drift apart.
+- **A failed `torch.cuda.graph()` capture poisons the whole CUDA context.**
+  `cudaErrorNoKernelImageForDevice` (and other fatal CUDA errors) are
+  context-corrupting, not per-call: once one kernel launch inside a capture
+  region hits a fatal error, every subsequent CUDA call in the process
+  — including totally unrelated, definitely-supported ones like a plain
+  `torch.nn.Linear` — starts failing with the same latched error. This made
+  an unrelated, already-fixed `joyomni_ops` gencode gap look like it was
+  still broken on the bf16-only (`_fp8_on=False`) path, since the plain
+  `Linear` failure downstream was actually just a symptom of the earlier,
+  real failure inside that same capture attempt.
 
 **RTX PRO 6000 — 480p @ 24 FPS:**
 

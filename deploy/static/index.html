@@ -1700,7 +1700,6 @@ async function start() {
   socket.onmessage = async (event) => {
     if (typeof event.data === "string") {
       const msg = JSON.parse(event.data);
-      console.log("[WS] JSON:", msg.type);
       noteBackendAck(msg);
       if (msg.type === "queue_position") {
         const ahead = Number(msg.ahead != null ? msg.ahead : msg.position) || 0;
@@ -1939,7 +1938,6 @@ async function start() {
       chunkProfileLast = meta.profile || chunkProfileLast;
       updateMetrics();
     }
-    console.log("[WS] Binary frame:", event.data.byteLength, "bytes, meta:", meta?.type);
     if (outCodecH264) {
       feedOutputH264(event.data, meta);
       return;
