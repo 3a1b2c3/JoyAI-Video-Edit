@@ -27,6 +27,16 @@ case "$GPU_NAME" in
     export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_b200}"
     export JOYOMNI_WIDTH="${JOYOMNI_WIDTH:-1248}" JOYOMNI_HEIGHT="${JOYOMNI_HEIGHT:-720}" JOYOMNI_FPS="${JOYOMNI_FPS:-30}"
     ;;
+  *GB300*|*GB200*)
+    # No DEPLOYMENT.md entry for GB300/GB200 -- inferring the B200 profile
+    # since it's the same Blackwell generation with equal-or-more memory
+    # (GB300 measured 251 GiB here vs B200's ~180 GiB HBM3e), not a
+    # confirmed/tested setting. Override JOYOMNI_WIDTH/HEIGHT/FPS if this
+    # doesn't hold up in practice.
+    echo "Profile: NVIDIA GB300/GB200 -- untested, inferring B200's 720p @ 30 FPS profile (same Blackwell generation, >= memory)"
+    export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_gb300}"
+    export JOYOMNI_WIDTH="${JOYOMNI_WIDTH:-1248}" JOYOMNI_HEIGHT="${JOYOMNI_HEIGHT:-720}" JOYOMNI_FPS="${JOYOMNI_FPS:-30}"
+    ;;
   *"RTX PRO 6000"*)
     echo "Profile: RTX PRO 6000 -- 480p @ 24 FPS (DEPLOYMENT.md §4)"
     export JOYOMNI_CACHE_ROOT="${JOYOMNI_CACHE_ROOT:-$SCRIPT_DIR/deploy/deps/cache_pro6000}"
