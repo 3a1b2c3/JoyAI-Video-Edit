@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Optional, Tuple
 
 import torch
@@ -25,6 +26,19 @@ def _try_import() -> bool:
         f"path={list(getattr(_joyomni_ops_debug, '__path__', []))!r}",
         flush=True,
     )
+    try:
+        _c_ext = _joyomni_ops_debug._C
+        _c_path = getattr(_c_ext, "__file__", None)
+    except AttributeError:
+        _c_path = None
+    if _c_path:
+        _c_mtime = os.path.getmtime(_c_path)
+        print(
+            f"[DEBUG joyomni_ops] _C extension so={_c_path!r} mtime={_c_mtime}",
+            flush=True,
+        )
+    else:
+        print("[DEBUG joyomni_ops] _C extension not found on joyomni_ops module", flush=True)
     from joyomni_ops import fused_norm_scale_shift, fused_qk_norm_rope_3d_paired, rmsnorm
     _RMSNORM = rmsnorm
     _FUSED_NORM_SCALE_SHIFT = fused_norm_scale_shift
