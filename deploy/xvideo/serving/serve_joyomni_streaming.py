@@ -877,6 +877,11 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 return 0
 
             if gate_state.get("absent_hold"):
+                print(
+                    f"#####[GATE] dropping {len(encoded_frames)} encoded frame(s): "
+                    f"absent_hold=True (gate_state={gate_state})",
+                    flush=True,
+                )
                 return 0
             count = len(encoded_frames)
             if not source_metas:
