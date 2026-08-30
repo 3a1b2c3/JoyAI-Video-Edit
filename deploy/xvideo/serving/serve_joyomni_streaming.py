@@ -997,14 +997,23 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 if h264_packets is not None:
                     wire, is_key = h264_packets[idx]
                 elif not isinstance(encoded, bytes):
-                    frames_out += 1
-                    ws_debug["frames_out"] = frames_out
-                    _rec_o = rec_output
-                    if _rec_o is not None:
-                        _rec_o.submit(encoded, source_meta.get("t_capture_ms"))
-                        ws_debug["rec_out_written"] = _rec_o.frames_written
-                        ws_debug["rec_out_dropped"] = _rec_o.frames_dropped_recording
-                    continue
+                    # Lossless/file-source mode returns raw numpy frames here
+                    # (joyomni_streaming.py's get_output_frames skips JPEG
+                    # compression to preserve full quality for disk output).
+                    # The shared success path below already submits `encoded`
+                    # (the original raw frame, not this JPEG preview copy) to
+                    # rec_output, so disk recording keeps its full quality
+                    # independent of this live-preview encode -- no separate
+                    # recording call needed here.
+                    import cv2
+                    bgr = cv2.cvtColor(encoded, cv2.COLOR_RGB2BGR)
+                    enc_params = [int(cv2.IMWRITE_JPEG_QUALITY), max(1, min(100, int(output_quality)))]
+                    ok, buf = cv2.imencode(".jpg", bgr, enc_params)
+                    if not ok:
+                        frames_out += 1
+                        ws_debug["frames_out"] = frames_out
+                        continue
+                    wire, is_key = buf.tobytes(), True
                 else:
                     wire, is_key = encoded, False
                 async with send_lock:
