@@ -271,3 +271,38 @@ failing with the same latched error. Don't assume the *last* op in a
 traceback is the real culprit if it's downstream of a `#####[GRAPH] capture
 failed` message; the actual failing op is whatever ran first inside that
 capture attempt.
+
+## 10. Adding an "Edit from Reference" preset card
+
+`deploy/static/index.html`'s `ref_tryon` case group (search for `key:
+"ref_tryon"`) drives the reference-image editing cards in the UI (NY Cap, Red
+Scarf, Pink Tee, Orange Glasses, Nailong, Replace Environment, Replace
+Character, Replace Scene). Adding a new one requires **two files kept in
+sync**, or the card renders with no image attached:
+
+1. `deploy/static/index.html` — add a case object to the `ref_tryon.cases`
+   array: `{ title, title_en, desc, desc_en, ref: "<key>", text, text_en }`.
+   `ref` is an arbitrary short key (e.g. `"environment"`), not a filename.
+2. `deploy/xvideo/serving/serve_joyomni_streaming.py` — register the same
+   `ref` key in the `REF_IMAGE_FILES` dict (near the top of the file, next to
+   `REF_IMAGE_DIR = REPO_ROOT / "rv2v_reference"`), mapping it to an actual
+   image filename that must exist under `deploy/rv2v_reference/` **on the
+   machine that serves the UI**.
+
+The frontend fetches all reference images once via `GET /ref-images`
+(`_ref_images_cached()` → `_load_ref_images()`) and caches them client-side
+in the `REF_IMAGES` JS object; clicking a card looks up `REF_IMAGES[item.ref]`
+to attach the reference image to the request. A missing file is handled
+gracefully server-side (`OSError` caught, key just omitted, logged as
+`#####[STREAM] ref image ... unavailable`) — it won't crash the endpoint, the
+card just won't have a reference image attached until the file is added.
+
+Plain style-transfer presets (the `style` group — 3D Animation, Oil Painting,
+Pixel Art, Anime Cel, Anime Cel (Night), etc.) don't need any of this; they're
+`{ title, title_en, desc, desc_en, text, text_en }` with no `ref` key and no
+backend change, since the prompt alone drives the edit.
+
+**Record-toggle default:** `#recordEnabled` (`index.html`, the `recToggle`
+label) defaults to **unchecked** — the `checked` HTML attribute was removed
+intentionally. The row itself only ever renders (`display:none` otherwise)
+when the server was launched with `--record-dir` (`SERVER_DEFAULTS.record_enabled`).

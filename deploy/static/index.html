@@ -257,7 +257,7 @@
     <label id="peToggle" class="pe-toggle keep-min"><input id="usePe" type="checkbox" checked style="width:auto" /> <span data-i18n="pe_toggle">提示词增强</span></label>
     <label id="gateToggle" class="pe-toggle keep-min"><input id="dbgGateEnabled" type="checkbox" checked style="width:auto" /> <span data-i18n="gate_toggle">人物在场检测</span></label>
     <label id="profToggle" class="pe-toggle keep-min"><input id="profileTimings" type="checkbox" style="width:auto" /> <span data-i18n="prof_toggle">性能分析</span></label>
-    <label id="recToggle" class="pe-toggle keep-min" style="display:none"><input id="recordEnabled" type="checkbox" checked style="width:auto" /> <span data-i18n="rec_toggle">录制</span></label>
+    <label id="recToggle" class="pe-toggle keep-min" style="display:none"><input id="recordEnabled" type="checkbox" style="width:auto" /> <span data-i18n="rec_toggle">录制</span></label>
     <span class="kvreset-field keep-min">
       <span data-i18n="upload_quality">上传清晰度</span>
       <span id="upqTier" class="qtier">
@@ -667,7 +667,7 @@ let resultSyncHandlers = null;
 let peWatchdog = null;
 let finalizeWatchdog = null;
 function stopRecordDrain() {
-  if (finalizeWatchdog) { clearTimeout(finalizeWatchdog); finalizeWatchdog = null; }
+  if (finalizeWatchdog) { clearInterval(finalizeWatchdog); finalizeWatchdog = null; }
 }
 let startingRun = false;
 let sessionGranted = false;
@@ -2061,6 +2061,7 @@ const PROMPT_GROUPS = [
       { title: "奶龙", title_en: "Nailong", desc: "主角换成参考图里的黄色玩偶", desc_en: "Subject → yellow toy from the reference image", ref: "nailong", text: "将视频中的主角替换为参考图中的黄色玩偶。", text_en: "Replace the main subject in the video with the yellow toy from the reference image." },
       { title: "替换环境", title_en: "Replace Environment", desc: "将当前环境替换为参考图中的环境", desc_en: "Replace current environment with the one from the reference image", ref: "environment", text: "将视频中的环境替换为参考图中的环境，主角保持不变。", text_en: "Replace the environment in the video with the one from the reference image, keeping the subject unchanged." },
       { title: "替换角色", title_en: "Replace Character", desc: "将当前角色替换为参考图中的角色", desc_en: "Replace current character with the one from the reference image", ref: "character", text: "将视频中的主角替换为参考图中的角色，环境保持不变。", text_en: "Replace the main character in the video with the character from the reference image, keeping the environment unchanged." },
+      { title: "替换场景", title_en: "Replace Scene", desc: "将当前场景替换为参考图中的场景", desc_en: "Replace current scene with the one from the reference image", ref: "scene", text: "将视频中的场景替换为参考图中的场景，主角保持不变。", text_en: "Replace the scene in the video with the one from the reference image, keeping the subject unchanged." },
     ],
   },
   {
@@ -2071,6 +2072,7 @@ const PROMPT_GROUPS = [
       { title: "油画质感", title_en: "Oil Painting", desc: "转成梵高厚涂油画风格", desc_en: "Van Gogh impasto oil-painting style", text: "将整个画面转换为梵高的画的风格。应用厚重、富有表现力的笔触，鲜艳且强烈的色彩，天空中和风景中动态旋转的纹理，以及梵高画作中特有的粗放油彩（厚涂法）效果。", text_en: "Convert the entire scene into the style of a Van Gogh painting. Apply thick, expressive brushstrokes, vivid and intense colors, dynamic swirling textures in the sky and landscape, and the coarse impasto oil effect characteristic of Van Gogh's work." },
       { title: "像素画", title_en: "Pixel Art", desc: "渲染为16色像素画风格", desc_en: "Render as 16-color pixel art", text: "将整个画面渲染为16色像素画风格。", text_en: "Render the entire scene in a 16-color pixel-art style." },
       { title: "日漫赛璐璐", title_en: "Anime Cel", desc: "转成日式动漫赛璐璐风格", desc_en: "Japanese anime cel-shaded style", text: "将整个画面转换为日式动漫赛璐璐风格：干净的黑色描边、大面积平涂的纯色色块、明确的明暗二分硬边阴影和简洁的高光。", text_en: "Convert the entire scene into a Japanese anime cel-shaded style: clean black outlines, large flat areas of solid color, clear hard-edged two-tone shading, and simple highlights." },
+      { title: "日漫赛璐璐（夜晚）", title_en: "Anime Cel (Night)", desc: "转成日式动漫赛璐璐风格的夜景", desc_en: "Japanese anime cel-shaded style, at night", text: "将整个画面转换为日式动漫赛璐璐风格：干净的黑色描边、大面积平涂的纯色色块、明确的明暗二分硬边阴影和简洁的高光，并将场景改为夜晚，加入路灯、窗户灯光和霓虹招牌等夜间光源，天空为深蓝或黑色。", text_en: "Convert the entire scene into a Japanese anime cel-shaded style: clean black outlines, large flat areas of solid color, clear hard-edged two-tone shading, and simple highlights, and change the scene to nighttime with streetlights, window light, and neon signage as light sources, and a dark blue or black sky." },
     ],
   },
   {
@@ -2281,13 +2283,23 @@ function handleVideoEnded() {
   if (ws && ws.readyState === WebSocket.OPEN && sessionGranted) {
     finalizeIsForResult = true;
     updateUploadProgress();
-    if (finalizeWatchdog) clearTimeout(finalizeWatchdog);
-    finalizeWatchdog = setTimeout(() => {
-      finalizeWatchdog = null;
-      if (!finalizeIsForResult) return;
-      finalizeIsForResult = false;
-      fetchAndShowResult();
-    }, 30000);
+    if (finalizeWatchdog) clearInterval(finalizeWatchdog);
+    let _fwLastFrames = backendOutFrames;
+    let _fwLastProgressAt = Date.now();
+    finalizeWatchdog = setInterval(() => {
+      if (!finalizeIsForResult) { clearInterval(finalizeWatchdog); finalizeWatchdog = null; return; }
+      if (backendOutFrames !== _fwLastFrames) {
+        _fwLastFrames = backendOutFrames;
+        _fwLastProgressAt = Date.now();
+        return;
+      }
+      if (Date.now() - _fwLastProgressAt > 20000) {
+        clearInterval(finalizeWatchdog);
+        finalizeWatchdog = null;
+        finalizeIsForResult = false;
+        fetchAndShowResult();
+      }
+    }, 2000);
     try { ws.send(JSON.stringify({ type: "finalize_recording" })); }
     catch (err) {}
   }
@@ -2475,7 +2487,7 @@ async function fetchAndShowResult() {
   }
 }
 function onRecordingFinalized(msg) {
-  if (finalizeWatchdog) { clearTimeout(finalizeWatchdog); finalizeWatchdog = null; }
+  if (finalizeWatchdog) { clearInterval(finalizeWatchdog); finalizeWatchdog = null; }
   downloadPending = false;
   if (msg && msg.ok === false) {
     finalizeIsForResult = false;

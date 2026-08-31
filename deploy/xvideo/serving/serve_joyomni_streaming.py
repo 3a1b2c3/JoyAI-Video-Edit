@@ -84,6 +84,7 @@ REF_IMAGE_FILES = {
     "nailong": "nailong.png",
     "environment": "environment.png",
     "character": "character.png",
+    "scene": "scene.png",
 }
 
 def _load_ref_images() -> dict[str, str]:
@@ -1113,9 +1114,17 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                     if result.valid_count is not None:
                         jpegs = jpegs[: result.valid_count]
                         source_metas = source_metas[: result.valid_count]
-                    await _send_encoded_frames(
-                        jpegs, source_metas, result.profile, float(result.elapsed or 0.0)
-                    )
+                    try:
+                        await _send_encoded_frames(
+                            jpegs, source_metas, result.profile, float(result.elapsed or 0.0)
+                        )
+                    except Exception as exc:
+                        print(f"#####[OUTPUT-PUMP] send failed, closing connection: {exc!r}", flush=True)
+                        try:
+                            await websocket.close()
+                        except Exception:
+                            pass
+                        break
 
         def _create_session():
             if session_settings is None:
@@ -1546,8 +1555,15 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
                         if session is not None:
                             await asyncio.to_thread(session.flush_pending)
-                            _flush_deadline = time.monotonic() + 20.0
-                            while frames_out < frames_in and time.monotonic() < _flush_deadline:
+                            _stall_timeout_s = 20.0
+                            _last_progress = time.monotonic()
+                            _last_frames_out = frames_out
+                            while frames_out < frames_in:
+                                if frames_out != _last_frames_out:
+                                    _last_frames_out = frames_out
+                                    _last_progress = time.monotonic()
+                                elif time.monotonic() - _last_progress > _stall_timeout_s:
+                                    break
                                 await asyncio.sleep(0.05)
                         last_activity = time.monotonic()
                         await _stop_output_task()
