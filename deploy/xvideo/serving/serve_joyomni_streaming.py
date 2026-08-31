@@ -82,6 +82,8 @@ REF_IMAGE_FILES = {
     "pink_tee": "1c182f2f-32cf-4825-904e-64c69aed2e31.png",
     "orange_glasses": "486b9561-e73d-45ca-bb2d-2a47998a0a73.png",
     "nailong": "nailong.png",
+    "environment": "environment.png",
+    "character": "character.png",
 }
 
 def _load_ref_images() -> dict[str, str]:
