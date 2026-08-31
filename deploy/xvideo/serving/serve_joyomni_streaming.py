@@ -650,7 +650,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
             "use_pe": args.use_pe,
             "pe_available": bool(os.environ.get("OPENAI_API_KEY")),
             "max_temporal_ids": args.max_temporal_ids,
-            "record_enabled": args.record_dir is not None,
+            "record_enabled": bool(args.record_dir),
         }
         html = _load_index_html().replace("__SERVER_DEFAULTS__", json.dumps(server_defaults))
         return HTMLResponse(html)
@@ -719,8 +719,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
     @app.get("/download_last")
     async def download_last() -> Response:
-        if args.record_dir is None:
-            return JSONResponse({"error": "Recording is not enabled (--record-dir is unset)."}, status_code=404)
+        if not args.record_dir:
+            return JSONResponse({"error": "Recording is not enabled (--record-dir is empty)."}, status_code=404)
         rec_dir = getattr(app.state, "last_recording_dir", None)
         if not rec_dir:
             return JSONResponse({"error": "No downloadable result yet. Send an edit first."}, status_code=404)
@@ -1198,9 +1198,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                     pass
             output_task = None
 
-        def _start_recorders() -> None:
+        def _start_recorders(enabled: bool = True) -> None:
             nonlocal rec_input, rec_output, rec_seq, rec_base
-            if args.record_dir is None:
+            if not args.record_dir or not enabled:
                 return
             _stop_recorders()
             try:
@@ -1523,7 +1523,7 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                                 "static_diff_thresh": static_diff_thresh,
                             }
                         )
-                        _start_recorders()
+                        _start_recorders(enabled=bool(payload.get("record", True)))
                         _start_output_task(session)
                         if not pe_defer:
                             def _prebake(_p=session_prompt, _s=session_settings, _r=ref_image):
@@ -1539,9 +1539,9 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         break
                     elif msg_type == "finalize_recording":
                         ws_debug["last_message_type"] = "finalize_recording"
-                        if args.record_dir is None:
+                        if not args.record_dir:
                             await _send_json({"type": "recording_finalized", "ok": False,
-                                              "message": "Recording is not enabled (--record-dir is unset)."})
+                                              "message": "Recording is not enabled (--record-dir is empty)."})
                             continue
 
                         if session is not None:
@@ -2077,7 +2077,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-close-timeout-s", type=float, default=5.0, help="Best-effort session cleanup timeout during WS teardown.")
     parser.add_argument("--inference-lock-timeout-s", type=float, default=5.0, help="Max seconds to wait for the process-wide inference lock.")
 
-    parser.add_argument("--record-dir", type=str, default=None, help="Directory to record input/output mp4s into (per-session subfolder). Off if unset.")
+    parser.add_argument("--record-dir", type=str, default=str(REPO_ROOT / "recordings"), help="Directory to record input/output mp4s into (per-session subfolder). Pass an empty string to disable.")
     parser.add_argument("--record-codec", type=str, default="libx264", help="Recording video codec (PyAV/ffmpeg name).")
     parser.add_argument("--record-bitrate", type=int, default=8_000_000, help="Recording target bitrate in bits/sec.")
     parser.add_argument("--record-segment-seconds", type=int, default=300, help="Roll to a new mp4 segment every N seconds of recorded frames.")

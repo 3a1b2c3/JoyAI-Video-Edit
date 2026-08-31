@@ -257,6 +257,7 @@
     <label id="peToggle" class="pe-toggle keep-min"><input id="usePe" type="checkbox" checked style="width:auto" /> <span data-i18n="pe_toggle">提示词增强</span></label>
     <label id="gateToggle" class="pe-toggle keep-min"><input id="dbgGateEnabled" type="checkbox" checked style="width:auto" /> <span data-i18n="gate_toggle">人物在场检测</span></label>
     <label id="profToggle" class="pe-toggle keep-min"><input id="profileTimings" type="checkbox" style="width:auto" /> <span data-i18n="prof_toggle">性能分析</span></label>
+    <label id="recToggle" class="pe-toggle keep-min" style="display:none"><input id="recordEnabled" type="checkbox" checked style="width:auto" /> <span data-i18n="rec_toggle">录制</span></label>
     <span class="kvreset-field keep-min">
       <span data-i18n="upload_quality">上传清晰度</span>
       <span id="upqTier" class="qtier">
@@ -354,6 +355,7 @@ const I18N = {
     pe_toggle: "提示词增强",
     gate_toggle: "人物在场检测",
     prof_toggle: "性能分析",
+    rec_toggle: "录制",
     upload_quality: "上传清晰度",
     download_quality: "下载清晰度",
     frame_speed: "送帧速度",
@@ -415,6 +417,7 @@ const I18N = {
     pe_toggle: "Prompt Enhance",
     gate_toggle: "Presence Gate",
     prof_toggle: "Profiling",
+    rec_toggle: "Record",
     upload_quality: "Upload quality",
     download_quality: "Download quality",
     frame_speed: "Frame rate",
@@ -1676,6 +1679,7 @@ async function beginSession() {
   const sdt = parseFloat(document.getElementById("staticDiffThresh").value);
   startPayload.static_diff_thresh = Number.isFinite(sdt) ? sdt : 0.5;
   startPayload.profile_timings = document.getElementById("profileTimings").checked;
+  startPayload.record = document.getElementById("recordEnabled").checked;
   startPayload.ref_image_strength = Number(document.getElementById("refImageStrength").value);
   sessionProfileTimings = startPayload.profile_timings;
   stageTimingsPanel.style.display = sessionProfileTimings ? "" : "none";
@@ -2219,6 +2223,8 @@ function renderPromptCases() {
 renderPromptCases();
 fetch("/ref-images").then((r) => (r.ok ? r.json() : {})).then((d) => { REF_IMAGES = d || {}; }).catch(() => {});
 syncPeAvailability();
+const recToggle = document.getElementById("recToggle");
+if (recToggle && SERVER_DEFAULTS && SERVER_DEFAULTS.record_enabled) recToggle.style.display = "";
 
 function handleVideoFileChange(event) {
   const file = event.target.files && event.target.files[0];
