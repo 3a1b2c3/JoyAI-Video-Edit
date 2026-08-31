@@ -750,15 +750,16 @@ class JoyOmniV2VStreamingSession:
             if mad < self.settings.static_diff_thresh:
                 if self._static_anchor_id is None:
                     self._static_anchor_id = chunk_idx - 1
-                    print(
-                        f"#####[FREEZE-KV] static detected at chunk_idx={chunk_idx} "
-                        f"(mad={mad:.3f} < {self.settings.static_diff_thresh}), "
-                        f"anchor={self._static_anchor_id}",
-                        flush=True,
-                    )
+                    if self.settings.profile_timings:
+                        print(
+                            f"#####[FREEZE-KV] static detected at chunk_idx={chunk_idx} "
+                            f"(mad={mad:.3f} < {self.settings.static_diff_thresh}), "
+                            f"anchor={self._static_anchor_id}",
+                            flush=True,
+                        )
                 anchor_id = self._static_anchor_id
             else:
-                if self._static_anchor_id is not None:
+                if self._static_anchor_id is not None and self.settings.profile_timings:
                     print(
                         f"#####[FREEZE-KV] motion resumed at chunk_idx={chunk_idx} "
                         f"(mad={mad:.3f}), anchor released",
@@ -1014,13 +1015,14 @@ class JoyOmniV2VStreamingSession:
                 history_chunk_ids = fz_history_with_anchor
                 selected_chunk_ids = fz_selected
                 gather_chunk_ids = fz_gather_head + [disguised_tail, active_chunk_id]
-                print(
-                    f"#####[FREEZE-KV] chunk_idx={chunk_idx} tail {old_tail}->anchor "
-                    f"{frozen_anchor_id} (KV), pos-disguise->{disguised_tail}, "
-                    f"kv_window={selected_chunk_ids} pos_window={gather_chunk_ids}",
-                    flush=True,
-                )
-            else:
+                if self.settings.profile_timings:
+                    print(
+                        f"#####[FREEZE-KV] chunk_idx={chunk_idx} tail {old_tail}->anchor "
+                        f"{frozen_anchor_id} (KV), pos-disguise->{disguised_tail}, "
+                        f"kv_window={selected_chunk_ids} pos_window={gather_chunk_ids}",
+                        flush=True,
+                    )
+            elif self.settings.profile_timings:
                 print(
                     f"#####[FREEZE-KV] chunk_idx={chunk_idx} anchor={frozen_anchor_id} "
                     f"degenerate (dup_or_collision), falling back to normal path",
@@ -1159,32 +1161,28 @@ class JoyOmniV2VStreamingSession:
         self.last_chunk_profile = profile
 
     def _log_chunk_profile(self, profile: dict[str, Any], input_frames: int, output_frames: int) -> None:
+        if not self.settings.profile_timings:
+            return
         elapsed = float(profile["total_server_chunk_s"])
-        if self.settings.profile_timings:
-            print(
-                f"#####[STREAM] chunk={profile['chunk_idx']} in_frames={input_frames} "
-                f"out_frames={output_frames} elapsed={elapsed:.3f}s "
-                f"vae_enc={float(profile.get('vae_encode_s', 0.0)):.3f}s "
-                f"dit={float(profile.get('dit_denoise_s', 0.0)):.3f}s "
-                f"kv_store={float(profile.get('kv_store_s', 0.0)):.3f}s "
-                f"vae_dec={float(profile.get('vae_decode_s', 0.0)):.3f}s "
-                f"jpeg={float(profile.get('jpeg_encode_s', 0.0)):.3f}s"
-            )
+        print(
+            f"#####[STREAM] chunk={profile['chunk_idx']} in_frames={input_frames} "
+            f"out_frames={output_frames} elapsed={elapsed:.3f}s "
+            f"vae_enc={float(profile.get('vae_encode_s', 0.0)):.3f}s "
+            f"dit={float(profile.get('dit_denoise_s', 0.0)):.3f}s "
+            f"kv_store={float(profile.get('kv_store_s', 0.0)):.3f}s "
+            f"vae_dec={float(profile.get('vae_decode_s', 0.0)):.3f}s "
+            f"jpeg={float(profile.get('jpeg_encode_s', 0.0)):.3f}s"
+        )
 
-            print(
-                f"#####[STREAM-QWAIT] chunk={profile['chunk_idx']} "
-                f"enc={float(profile.get('q_wait_encode_s', 0.0)) * 1000:.0f}ms "
-                f"dit={float(profile.get('q_wait_dit_s', 0.0)) * 1000:.0f}ms "
-                f"dec={float(profile.get('q_wait_decode_s', 0.0)) * 1000:.0f}ms "
-                f"pseudo={float(profile.get('q_wait_pseudo_s', 0.0)) * 1000:.0f}ms "
-                f"post={float(profile.get('q_wait_postprocess_s', 0.0)) * 1000:.0f}ms",
-                flush=True,
-            )
-        else:
-            print(
-                f"#####[STREAM] chunk={profile['chunk_idx']} in_frames={input_frames} "
-                f"out_frames={output_frames} elapsed={elapsed:.3f}s profile_timings=off"
-            )
+        print(
+            f"#####[STREAM-QWAIT] chunk={profile['chunk_idx']} "
+            f"enc={float(profile.get('q_wait_encode_s', 0.0)) * 1000:.0f}ms "
+            f"dit={float(profile.get('q_wait_dit_s', 0.0)) * 1000:.0f}ms "
+            f"dec={float(profile.get('q_wait_decode_s', 0.0)) * 1000:.0f}ms "
+            f"pseudo={float(profile.get('q_wait_pseudo_s', 0.0)) * 1000:.0f}ms "
+            f"post={float(profile.get('q_wait_postprocess_s', 0.0)) * 1000:.0f}ms",
+            flush=True,
+        )
 
     @staticmethod
     def _align_source_metas(
