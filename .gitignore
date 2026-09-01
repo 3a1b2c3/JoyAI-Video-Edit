@@ -16,6 +16,5 @@ deploy/joyomni_ops/**/*.so
 # Third-party build checkouts (SageAttention, cutlass -> deploy/tmp/, see DEPLOYMENT.md §2)
 deploy/tmp/
 
-# Hugging Face Space staging + ZeroGPU engine (never commit to the public repo)
+# Hugging Face Space checkout (never commit to the public repo)
 deploy/hf_space/
-deploy/xvideo/serving/zerogpu_engine.py
