@@ -69,5 +69,6 @@ python xvideo/serving/serve_joyomni_streaming.py \
   --postprocess-device "$DEVICE" \
   --width "${JOYOMNI_WIDTH:-840}" --height "${JOYOMNI_HEIGHT:-480}" \
   --fps "${JOYOMNI_FPS:-24}" \
+  --pe-timeout-s "${JOYOMNI_PE_TIMEOUT_S:-60}" \
   --host "$HOST" --port "$PORT" \
   "$@"

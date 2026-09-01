@@ -162,6 +162,8 @@
       /* panel titles go icon-only so 摄像头/MP4 fits the narrow head */
       .vpanel-head .vp-title span[data-i18n] { display: none; }
       .cmd-input { font-size: 12px; max-height: 125px; }
+      /* bottom sheet: the cmdbar is tall on mobile, absolute-above would cover the camera */
+      .cards-pop { position: fixed; left: 8px; right: 8px; bottom: 8px; }
     }
     @media (max-width: 1000px) and (orientation: landscape) {
       .media-box { aspect-ratio: 16 / 9; max-height: 60vh; }
@@ -372,7 +374,6 @@ const I18N = {
     stage_ws: "WS 发送", stage_total: "服务端合计", stage_residence: "服务端驻留",
     stage_enc_q: "编码队列", stage_ws_buf: "发送缓冲", stage_recv_q: "接收队列",
     busy_released: "已释放", busy_disconnected: "已断开", busy_conn_err: "连接错误",
-    pe_fallback: " 回退", pe_error: " 错误",
     reset_count_changed: "检测到人数变化，重新编辑",
     reset_person_returned: "重新检测到人，重新开始编辑",
     reset_kv: "已连续编辑较久，正在重新校准，请保持人脸居中 😊",
@@ -433,7 +434,6 @@ const I18N = {
     stage_ws: "WS send", stage_total: "Server total", stage_residence: "Server residence",
     stage_enc_q: "Encode queue", stage_ws_buf: "Send buffer", stage_recv_q: "Recv queue",
     busy_released: "Released", busy_disconnected: "Disconnected", busy_conn_err: "Connection error",
-    pe_fallback: " fallback", pe_error: " error",
     reset_count_changed: "Person count changed, re-editing",
     reset_person_returned: "Person detected again, restarting the edit",
     reset_kv: "Editing for a while — recalibrating, please keep your face centered 😊",
@@ -651,7 +651,6 @@ let finalizeIsForResult = false;
 let resultEpoch = 0;
 let resultSyncActive = false;
 let resultSyncHandlers = null;
-let peWatchdog = null;
 let finalizeWatchdog = null;
 function stopRecordDrain() {
   if (finalizeWatchdog) { clearTimeout(finalizeWatchdog); finalizeWatchdog = null; }
@@ -1778,7 +1777,6 @@ async function start() {
         return;
       }
       if (msg.type === "prompt_enhanced") {
-        if (peWatchdog) { clearTimeout(peWatchdog); peWatchdog = null; }
         pePausedSend = false;
         clearOutputQueue();
         lastShownCaptureMs = Date.now();
@@ -1787,12 +1785,9 @@ async function start() {
           try { camera.pause(); } catch (err) {}
           startVideoPull();
         }
-        const elapsed = Number(msg.elapsed_s || 0);
-        const fallback = msg.fallback ? t("pe_fallback") : "";
-        const error = msg.error ? t("pe_error") : "";
         const enhanced = msg.enhanced_prompt || msg.raw_prompt || "";
-        showPeResult(msg.error ? "" : enhanced, msg.model);
-        if (pendingPeCacheKey && msg.enhanced_prompt && !msg.error) {
+        showPeResult((msg.error || msg.fallback) ? "" : enhanced, msg.model);
+        if (pendingPeCacheKey && msg.enhanced_prompt && !msg.error && !msg.fallback) {
           peCache = { key: pendingPeCacheKey, enhanced_prompt: msg.enhanced_prompt, raw_prompt: msg.raw_prompt || "", model: msg.model || "" };
         }
         return;
@@ -1866,16 +1861,6 @@ async function start() {
         if (outputWaitIco) outputWaitIco.textContent = "✨";
         if (outputWaitHint) outputWaitHint.textContent = t("pe_running");
         waitHintReason = "pe_running"; waitHintAt = Date.now();
-        if (peWatchdog) clearTimeout(peWatchdog);
-        peWatchdog = setTimeout(() => {
-          peWatchdog = null;
-          if (!pePausedSend) return;
-          pePausedSend = false;
-          if (usingVideoFile) {
-            try { camera.pause(); } catch (err) {}
-            startVideoPull();
-          }
-        }, 30000);
         return;
       }
       if (msg.type === "chunk_done") {
@@ -1949,7 +1934,6 @@ async function start() {
     outputPlaybackIntervalMs = null;
     clearOutputQueue();
     stopRecordDrain();
-    if (peWatchdog) { clearTimeout(peWatchdog); peWatchdog = null; }
     finalizeIsForResult = false;
     resultEpoch += 1;
     ws = null;
