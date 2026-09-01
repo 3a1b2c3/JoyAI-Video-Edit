@@ -82,7 +82,7 @@
     .ref-lightbox { display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.82); align-items: center; justify-content: center; cursor: zoom-out; padding: 24px; }
     .ref-lightbox.show { display: flex; }
     .ref-lightbox img { max-width: 92vw; max-height: 92vh; object-fit: contain; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
-    .cmd-input { flex: 1 1 auto; min-width: 0; border: none; outline: none; background: transparent; resize: none; font: inherit; font-size: 15px; color: var(--text); line-height: 1.4; max-height: 120px; padding: 12px 4px; }
+    .cmd-input { flex: 1 1 auto; min-width: 0; border: none; outline: none; background: transparent; resize: none; font: inherit; font-size: 15px; color: var(--text); line-height: 1.4; max-height: 150px; padding: 12px 4px; }
     .cmd-input::placeholder { color: #b6b6b0; }
     .send-fab { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 50%; border: none; cursor: pointer; background: var(--accent); color: #fff; font-size: 0; display: inline-flex; align-items: center; justify-content: center; }
     .send-fab::before { content: "\2191"; font-size: 20px; font-weight: 700; line-height: 1; }
@@ -159,11 +159,9 @@
       .cmd-foot .kvreset-field { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
       .qtier { flex-wrap: wrap; }
       .qtier button { padding: 7px 12px; }
-      /* debug readouts hide behind the Profiling toggle; #sendHint stays */
-      .latency-row #netReadout, .latency-row #dispLatency, .latency-row #fpsReadout { display: none; }
-      body:has(#profileTimings:checked) .latency-row #netReadout,
-      body:has(#profileTimings:checked) .latency-row #dispLatency,
-      body:has(#profileTimings:checked) .latency-row #fpsReadout { display: inline; }
+      /* panel titles go icon-only so 摄像头/MP4 fits the narrow head */
+      .vpanel-head .vp-title span[data-i18n] { display: none; }
+      .cmd-input { font-size: 12px; max-height: 125px; }
     }
     @media (max-width: 1000px) and (orientation: landscape) {
       .media-box { aspect-ratio: 16 / 9; max-height: 60vh; }
@@ -278,8 +276,6 @@
     <span class="kvreset-field keep-min">
       <span data-i18n="frame_speed">送帧速度</span>
       <span id="fpsTier" class="qtier">
-        <button type="button" data-fps="40">40</button>
-        <button type="button" data-fps="36">36</button>
         <button type="button" data-fps="32">32</button>
         <button type="button" data-fps="30">30</button>
         <button type="button" data-fps="28">28</button>
@@ -2098,9 +2094,16 @@ const PROMPT_GROUPS = [
   },
 ];
 
+const promptBox = document.getElementById("prompt");
+function autosizePrompt() {
+  promptBox.style.height = "auto";
+  promptBox.style.height = promptBox.scrollHeight + "px";
+}
+promptBox.addEventListener("input", autosizePrompt);
+
 function applyCaseSelection(item, group) {
-  const promptEl = document.getElementById("prompt");
-  promptEl.value = sceneField(item, "text");
+  promptBox.value = sceneField(item, "text");
+  autosizePrompt();
   if (item.ref && REF_IMAGES && REF_IMAGES[item.ref]) {
     const el = document.getElementById("refImage");
     if (el) el.value = "";

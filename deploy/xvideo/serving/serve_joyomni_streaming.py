@@ -175,7 +175,9 @@ class _H264Stream:
                 "tune": "zerolatency",
                 "crf": str(self._crf),
                 "g": "16",
-                "x264-params": "scenecut=0:repeat-headers=1",
+                # cv2 gives BT.601/tv; without VUI browsers guess BT.709 at 720p.
+                "x264-params": "scenecut=0:repeat-headers=1:"
+                "colorprim=smpte170m:transfer=smpte170m:colormatrix=smpte170m:range=tv",
             }
             enc.open()
             self._enc = enc
@@ -192,11 +194,17 @@ class _H264Stream:
 class _H264Ingest:
     def __init__(self) -> None:
         import av
+        import numpy as np
 
         self._dec = av.CodecContext.create("h264", "r")
+        # Chrome uplink is BT.709/tv, cv2's I420 path is BT.601: exact fix = A709 @ inv(A601).
+        self._bt601_to_bt709 = np.array([[1.086529, -0.072448, -0.014080],
+                                         [0.096451, 0.844939, 0.058610],
+                                         [-0.014082, -0.027645, 1.041727]])
 
     def decode_one(self, au: bytes) -> Image.Image | None:
         import av
+        import cv2
 
         try:
             frames = self._dec.decode(av.Packet(au))
@@ -204,7 +212,8 @@ class _H264Ingest:
             return None
         if not frames:
             return None
-        return Image.fromarray(frames[-1].to_ndarray(format="rgb24"), mode="RGB")
+        rgb = cv2.cvtColor(frames[-1].to_ndarray(format="yuv420p"), cv2.COLOR_YUV2RGB_I420)
+        return Image.fromarray(cv2.transform(rgb, self._bt601_to_bt709), mode="RGB")
 
 
 _FACE_DETECTOR: dict[str, Any] = {}
@@ -482,6 +491,11 @@ class _SegmentedRecorder:
         stream.pix_fmt = "yuv420p"
         stream.time_base = Fraction(1, 1000)
         stream.codec_context.time_base = Fraction(1, 1000)
+        # PyAV converts rgb24 as BT.601/tv; declare it or players guess 709 at 720p.
+        stream.codec_context.colorspace = 6
+        stream.codec_context.color_primaries = 6
+        stream.codec_context.color_trc = 6
+        stream.codec_context.color_range = 1
         if self._lossless:
             stream.codec_context.options = {"crf": "8", "preset": "medium"}
         else:
