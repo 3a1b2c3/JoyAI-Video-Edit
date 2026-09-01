@@ -2260,13 +2260,17 @@ function handleVideoEnded() {
   updateMetrics();
   if (ws && ws.readyState === WebSocket.OPEN && sessionGranted) {
     finalizeIsForResult = true;
+    lastRecId = null;
     updateUploadProgress();
     if (finalizeWatchdog) clearTimeout(finalizeWatchdog);
     finalizeWatchdog = setTimeout(() => {
       finalizeWatchdog = null;
       if (!finalizeIsForResult) return;
       finalizeIsForResult = false;
-      fetchAndShowResult();
+      stopResultSync();
+      if (outputWaitOverlay) outputWaitOverlay.style.display = "none";
+      showOutputIdle(true);
+      setSendBusy(false, "");
     }, 30000);
     try { ws.send(JSON.stringify({ type: "finalize_recording" })); }
     catch (err) {}
@@ -2316,7 +2320,7 @@ function setSourceSeg(src) {
   if (segM) segM.addEventListener("click", () => { document.getElementById("videoFile").click(); });
 }
 const downloadBubble = document.getElementById("downloadBubble");
-let downloadPending = false;
+let lastRecId = null;
 function showDownloadBubble(show) {
   if (!downloadBubble) return;
   if (show && !(SERVER_DEFAULTS && SERVER_DEFAULTS.record_enabled)) return;
@@ -2386,6 +2390,7 @@ function stopResultSync() {
 function clearResultVideo() {
   stopResultSync();
   finalizeIsForResult = false;
+  lastRecId = null;
   resultEpoch += 1;
   if (typeof showDownloadBubble === "function") showDownloadBubble(false);
   if (outputResult) {
@@ -2412,29 +2417,13 @@ function triggerBrowserDownload(url, filename) {
   a.click();
   a.remove();
 }
-async function fetchAndSaveRecording() {
-  if (resultBlobUrl) {
-    triggerBrowserDownload(resultBlobUrl, "joyomni_output.mp4");
-    return;
-  }
-  try {
-    const resp = await fetch("/download_last", { cache: "no-store" });
-    if (!resp.ok) {
-      let detail = "";
-      try { const j = await resp.json(); detail = j.error || ""; } catch (e) {}
-      return;
-    }
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    triggerBrowserDownload(url, "joyomni_output.mp4");
-    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 60000);
-  } catch (err) {
-  }
+function fetchAndSaveRecording() {
+  if (resultBlobUrl) triggerBrowserDownload(resultBlobUrl, "joyomni_output.mp4");
 }
 async function fetchAndShowResult() {
   const myEpoch = resultEpoch;
   try {
-    const resp = await fetch("/download_last", { cache: "no-store" });
+    const resp = await fetch("/download_last?rec=" + encodeURIComponent(lastRecId), { cache: "no-store" });
     if (myEpoch !== resultEpoch) return;
     if (!resp.ok) {
       let detail = "";
@@ -2456,8 +2445,8 @@ async function fetchAndShowResult() {
 }
 function onRecordingFinalized(msg) {
   if (finalizeWatchdog) { clearTimeout(finalizeWatchdog); finalizeWatchdog = null; }
-  downloadPending = false;
-  if (msg && msg.ok === false) {
+  lastRecId = msg.rec || null;
+  if (!lastRecId) {
     finalizeIsForResult = false;
     stopResultSync();
     if (outputWaitOverlay) outputWaitOverlay.style.display = "none";

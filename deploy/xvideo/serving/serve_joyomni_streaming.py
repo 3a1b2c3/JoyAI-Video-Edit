@@ -8,6 +8,7 @@ import json
 import math
 import os
 import queue
+import re
 import sys
 import tempfile
 import threading
@@ -619,8 +620,6 @@ def create_app(args: argparse.Namespace) -> FastAPI:
 
     app.state.session_gate = SessionGate()
 
-    app.state.last_recording_dir = None
-
     @app.get("/")
     def index() -> HTMLResponse:
         server_defaults = {
@@ -706,13 +705,14 @@ def create_app(args: argparse.Namespace) -> FastAPI:
         return JSONResponse({"ok": True, "elapsed": time.time() - started})
 
     @app.get("/download_last")
-    async def download_last() -> Response:
+    async def download_last(rec: str = "") -> Response:
         if args.record_dir is None:
             return JSONResponse({"error": "Recording is not enabled (--record-dir is unset)."}, status_code=404)
-        rec_dir = getattr(app.state, "last_recording_dir", None)
-        if not rec_dir:
-            return JSONResponse({"error": "No downloadable result yet. Send an edit first."}, status_code=404)
-        base = Path(rec_dir)
+        if not re.fullmatch(r"\d+_\d+", rec):
+            return JSONResponse({"error": "Missing or invalid rec id."}, status_code=400)
+        base = Path(args.record_dir) / rec
+        if not base.is_dir():
+            return JSONResponse({"error": "No such recording."}, status_code=404)
         segments = sorted(base.glob("output_*.mp4"))
         if not segments:
             return JSONResponse({"error": "Recording file has not been generated yet. Try again later."}, status_code=404)
@@ -1522,11 +1522,10 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                         await _stop_output_task()
                         finalized = rec_base
                         await asyncio.to_thread(_stop_recorders)
-                        if finalized is not None:
-                            app.state.last_recording_dir = str(finalized)
                         await _send_json({
                             "type": "recording_finalized",
                             "ok": finalized is not None,
+                            "rec": finalized.name if finalized is not None else None,
                             "message": None if finalized is not None
                             else "No downloadable result yet. Send an edit first.",
                         })
