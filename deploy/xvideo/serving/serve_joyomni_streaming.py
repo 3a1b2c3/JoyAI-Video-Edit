@@ -859,6 +859,16 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 if "close message" in str(exc).lower():
                     raise WebSocketDisconnect()
                 raise
+            except AssertionError:
+                # Known race in `websockets` legacy protocol's internal
+                # _drain_helper: `assert waiter is None or waiter.cancelled()`
+                # can fail if the connection's writer is closed/reset by a
+                # DIFFERENT task (e.g. session teardown during a rapid
+                # restart) while this send's drain() is still in flight --
+                # `send_lock` only serializes sends against each other, not
+                # against a concurrent close(). Same real-world cause as the
+                # RuntimeError above, just surfacing from a different layer.
+                raise WebSocketDisconnect()
 
         async def _ws_send_bytes(data: bytes) -> None:
             try:
@@ -869,6 +879,8 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 if "close message" in str(exc).lower():
                     raise WebSocketDisconnect()
                 raise
+            except AssertionError:
+                raise WebSocketDisconnect()
 
         async def _send_json(payload: dict[str, Any]) -> None:
             async with send_lock:

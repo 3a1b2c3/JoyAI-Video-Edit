@@ -2477,6 +2477,8 @@ async function fetchAndShowResult() {
     if (!resp.ok) {
       let detail = "";
       try { const j = await resp.json(); detail = j.error || ""; } catch (e) {}
+      console.warn("fetchAndShowResult: /download_last failed", resp.status, detail);
+      showOutputToast(detail || `Download failed (${resp.status})`, 5000);
       setSendBusy(false, "");
       return;
     }
@@ -2490,6 +2492,9 @@ async function fetchAndShowResult() {
     showOutputToast(t("toast_done"), 4000);
     setSendBusy(false, "");
   } catch (err) {
+    console.warn("fetchAndShowResult: unexpected error", err);
+    showOutputToast(`Download failed: ${err && err.message ? err.message : err}`, 5000);
+    setSendBusy(false, "");
   }
 }
 function onRecordingFinalized(msg) {
