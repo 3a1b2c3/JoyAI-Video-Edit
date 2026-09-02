@@ -31,5 +31,6 @@ uvicorn==0.37.0
 uvloop==0.22.1
 ninja==1.13.0
 websockets==16.0
+wsproto==1.2.0
 openai==2.41.0
 loguru==0.7.3

@@ -2142,7 +2142,24 @@ def main() -> None:
     from xvideo.lowvram import apply_vram_cap_for_testing
     apply_vram_cap_for_testing(args.device)
     app = create_app(args)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info", ws_max_size=32 * 1024 * 1024, ws_per_message_deflate=False, loop="uvloop")
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        ws_max_size=32 * 1024 * 1024,
+        ws_per_message_deflate=False,
+        loop="uvloop",
+        # wsproto instead of uvicorn's default "auto" (which picks the legacy
+        # websockets.legacy asyncio implementation): that implementation has a known
+        # keepalive-ping assertion bug under event-loop starvation (see ws_ping_*
+        # below) that wsproto doesn't share.
+        ws="wsproto",
+        # GIL contention from GPU inference in asyncio.to_thread() worker threads can
+        # delay the event loop long enough to miss the default 20s keepalive deadline.
+        ws_ping_interval=30,
+        ws_ping_timeout=30,
+    )
 
 
 if __name__ == "__main__":
