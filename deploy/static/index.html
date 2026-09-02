@@ -1526,7 +1526,9 @@ async function tick() {
       return;
     }
     const blob = await frameBlob(width, height, effectiveUpQuality());
-    if (!blob || ws.readyState !== WebSocket.OPEN) return;
+    // Same race as sendCurrentVideoFrame: ws can be nulled by a disconnect
+    // handler while suspended at the await above.
+    if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
     const seq = sentFrames + 1;
     const tCaptureMs = Date.now();
     try {
@@ -1559,7 +1561,11 @@ async function sendCurrentVideoFrame(mediaTimeSec) {
   const height = Number(document.getElementById("height").value);
   const quality = effectiveUpQuality();
   const blob = await frameBlob(width, height, quality);
-  if (!blob || ws.readyState !== WebSocket.OPEN) return false;
+  // Re-check !ws, not just !blob -- ws can be nulled by a disconnect
+  // handler while this function was suspended at the await above; reading
+  // .readyState on a null ws throws "Cannot read properties of null
+  // (reading 'readyState')" instead of returning false cleanly.
+  if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return false;
   const seq = sentFrames + 1;
   const tCaptureMs = Math.round(mediaTimeSec * 1000);
   try {
