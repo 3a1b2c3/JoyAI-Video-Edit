@@ -845,12 +845,30 @@ def create_app(args: argparse.Namespace) -> FastAPI:
                 await asyncio.wait_for(websocket.send_json(payload), timeout=WS_SEND_TIMEOUT_S)
             except asyncio.TimeoutError:
                 raise WebSocketDisconnect()
+            except RuntimeError as exc:
+                # Starlette raises this (not WebSocketDisconnect) when the
+                # connection already sent/received a close frame before this
+                # send was attempted -- a real race under rapid restart
+                # ('start' received while a prior session is still tearing
+                # down), not an actual server bug. The outer handler's
+                # `except RuntimeError: if "disconnect" not in str(exc)...`
+                # guard doesn't catch this specific message ("Cannot call
+                # \"send\" once a close message has been sent."), so it was
+                # propagating as an unhandled exception instead of a clean
+                # disconnect. Convert here, matching the TimeoutError path.
+                if "close message" in str(exc).lower():
+                    raise WebSocketDisconnect()
+                raise
 
         async def _ws_send_bytes(data: bytes) -> None:
             try:
                 await asyncio.wait_for(websocket.send_bytes(data), timeout=WS_SEND_TIMEOUT_S)
             except asyncio.TimeoutError:
                 raise WebSocketDisconnect()
+            except RuntimeError as exc:
+                if "close message" in str(exc).lower():
+                    raise WebSocketDisconnect()
+                raise
 
         async def _send_json(payload: dict[str, Any]) -> None:
             async with send_lock:
